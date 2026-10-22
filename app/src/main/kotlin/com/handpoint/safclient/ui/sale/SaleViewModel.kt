@@ -5,13 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.handpoint.safclient.di.IoDispatcher
 import com.handpoint.safclient.domain.AppPreferences
 import com.handpoint.safclient.domain.ErrorReporter
-import com.handpoint.safclient.domain.OnlineTerminal
 import com.handpoint.safclient.domain.PaymentModeCoordinator
-import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
-import com.handpoint.safclient.domain.model.PaymentMode
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.domain.model.approvedSale
@@ -102,6 +99,15 @@ class SaleViewModel @Inject constructor(
     /** Emits when a key press is ignored because the amount would pass [MAX_MINOR_UNITS]. */
     val entryRejected: SharedFlow<Unit> = _entryRejected.asSharedFlow()
 
+    init {
+        // A retry to online sales waits while this screen is open: it would disable Charge.
+        payments.enterChargeScreen()
+    }
+
+    override fun onCleared() {
+        payments.leaveChargeScreen()
+    }
+
     private val _messages = Channel<String>(Channel.BUFFERED)
 
     /** One-off messages for a snackbar. */
@@ -135,25 +141,15 @@ class SaleViewModel @Inject constructor(
             _messages.trySend(SWITCHING_MESSAGE)
             return
         }
-        // An error after the sale started leaves its outcome unknown, in the mode it ran in.
-        val unknown = when (payments.state.value.mode) {
-            PaymentMode.ONLINE -> OnlineTerminal.OUTCOME_UNKNOWN
-            PaymentMode.OFFLINE -> StoreAndForwardTerminal.OUTCOME_UNKNOWN
-        }
         _state.value = ChargeUiState.InProgress(step = null)
         viewModelScope.launch {
             // Card steps are hot with no replay: listen before the sale starts.
             val steps = launch(start = CoroutineStart.UNDISPATCHED) {
                 payments.cardSteps.collect { _state.value = ChargeUiState.InProgress(it) }
             }
+            // TakeSale ends every error as the unknown outcome of the mode the sale ran in.
             val outcome = try {
                 withContext(io) { takeSale(money) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // The sale may have gone through before the error (journal or reconcile failed).
-                errors.report("sale", e)
-                SaleOutcome.Failed(unknown)
             } finally {
                 steps.cancel()
             }

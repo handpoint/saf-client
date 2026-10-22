@@ -2,6 +2,7 @@ package com.handpoint.safclient.ui.detail
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import com.handpoint.safclient.domain.PaymentModeCoordinator
 import com.handpoint.safclient.domain.model.DeleteResult
 import com.handpoint.safclient.domain.model.ProcessingStatus.IN_PROGRESS
 import com.handpoint.safclient.domain.model.ProcessingStatus.STORED
@@ -10,12 +11,17 @@ import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.usecase.DeleteStoredSale
 import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
 import com.handpoint.safclient.domain.usecase.RefreshSaleStatus
+import com.handpoint.safclient.testutil.FakeNetworkMonitor
 import com.handpoint.safclient.testutil.FakePreferences
 import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.testutil.RecordingErrorReporter
+import com.handpoint.safclient.testutil.paymentMode
 import com.handpoint.safclient.ui.navigation.Routes
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -23,6 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -32,9 +39,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SaleDetailViewModelTest {
@@ -43,6 +47,8 @@ class SaleDetailViewModelTest {
     private val clock = Clock.fixed(Instant.parse("2026-10-22T12:00:00Z"), ZoneOffset.UTC)
     private val terminal = FakeTerminal()
     private val errors = RecordingErrorReporter()
+    private val network = FakeNetworkMonitor()
+    private lateinit var payments: PaymentModeCoordinator
 
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
@@ -61,6 +67,7 @@ class SaleDetailViewModelTest {
                 ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
                 clock,
             ),
+            payments = paymentMode(terminal, journal, clock, network = network, io = dispatcher).also { payments = it },
             io = dispatcher,
             errors = errors,
         )
@@ -190,5 +197,21 @@ class SaleDetailViewModelTest {
         assertTrue(state.notFound)
         assertFalse(state.isLoading)
         assertFalse(state.canDelete)
+    }
+
+    @Test
+    fun `refresh does nothing while the app takes online sales`() = runTest(dispatcher) {
+        val journal = InMemoryJournal(sale("A", IN_PROGRESS))
+        val viewModel = detailViewModel(journal)
+        network.status.value = com.handpoint.safclient.domain.model.NetworkStatus.ONLINE
+        ReconcileStoredSales(terminal, journal, FakePreferences(), clock)() // not this coordinator's
+        payments.start()
+        runCurrent()
+        // The coordinator's own reconcile ran when the network came up: it is online now.
+        assertFalse(viewModel.uiState.value.storeAndForwardActive)
+
+        viewModel.refreshStatus()
+
+        assertTrue(terminal.statusRequests.isEmpty())
     }
 }

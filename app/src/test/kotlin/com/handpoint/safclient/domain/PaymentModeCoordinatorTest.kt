@@ -6,6 +6,7 @@ import com.handpoint.safclient.domain.model.ForwardingEvent.Started
 import com.handpoint.safclient.domain.model.ForwardingResult
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.NetworkStatus
+import com.handpoint.safclient.domain.model.OnlineWait
 import com.handpoint.safclient.domain.model.PaymentMode.OFFLINE
 import com.handpoint.safclient.domain.model.PaymentMode.ONLINE
 import com.handpoint.safclient.domain.model.ProcessingStatus
@@ -72,6 +73,7 @@ class PaymentModeCoordinatorTest {
 
     /** A coordinator that has seen the terminal's answer (empty unless set before). */
     private suspend fun TestScope.started(): PaymentModeCoordinator = coordinator().also {
+        current = it
         reconcile()
         it.start()
         runCurrent()
@@ -103,15 +105,33 @@ class PaymentModeCoordinatorTest {
 
     @Test
     fun `it waits for the terminal's answer before going online`() = runTest {
+        saf.connectionState.value = TerminalConnection.DISCONNECTED // the terminal cannot answer yet
         network.status.value = NetworkStatus.ONLINE
         val mode = coordinator()
 
         mode.start()
         runCurrent()
         assertEquals(OFFLINE, mode.state.value.mode)
+        assertEquals(OnlineWait.AWAITING_TERMINAL, mode.state.value.onlineWait)
 
+        saf.connectionState.value = TerminalConnection.CONNECTED
         reconcile()
         runCurrent()
+        assertEquals(ONLINE, mode.state.value.mode)
+        assertNull(mode.state.value.onlineWait)
+    }
+
+    @Test
+    fun `when the network comes back and the terminal never answered, it asks the terminal`() = runTest {
+        val mode = coordinator()
+        mode.start()
+        runCurrent()
+        assertEquals(0, saf.storedCalls)
+
+        network.status.value = NetworkStatus.ONLINE
+        runCurrent()
+
+        assertEquals(1, saf.storedCalls)
         assertEquals(ONLINE, mode.state.value.mode)
     }
 
@@ -155,6 +175,7 @@ class PaymentModeCoordinatorTest {
         send().toList()
         runCurrent()
         assertEquals(OFFLINE, mode.state.value.mode) // the follow-up still needs Store and Forward
+        assertEquals(OnlineWait.BUSY_FOLLOW_UP, mode.state.value.onlineWait)
 
         advanceTimeBy(119_000)
         runCurrent()
@@ -175,6 +196,7 @@ class PaymentModeCoordinatorTest {
         advanceTimeBy(60_000)
         runCurrent()
         assertEquals(OFFLINE, mode.state.value.mode)
+        assertEquals(OnlineWait.WAITING_IDLE, mode.state.value.onlineWait)
         assertEquals(0, online.activateCalls)
 
         mode.endSale()
@@ -239,7 +261,7 @@ class PaymentModeCoordinatorTest {
         assertEquals(TerminalConnection.CONNECTED, mode.connection.value)
 
         online.connectsOnActivate = true
-        advanceTimeBy(PaymentModeCoordinator.RETRY_ONLINE_AFTER.inWholeMilliseconds)
+        advanceTimeBy(PaymentModeCoordinator.RETRY_ONLINE_DELAYS[0].inWholeMilliseconds)
         runCurrent()
         assertEquals(ONLINE, mode.state.value.mode)
         assertFalse(mode.state.value.onlineUnavailable)
@@ -297,4 +319,155 @@ class PaymentModeCoordinatorTest {
         assertEquals(listOf("receipt"), online.printed)
         assertEquals(0, saf.cancelCalls)
     }
+
+    // --- retries after a failed switch to online ------------------------------------------------
+
+    /** Advances to just before and just after [atMs] (virtual time since the test started). */
+    private fun TestScope.assertAttemptAt(atMs: Long, attemptsBefore: Int) {
+        advanceTimeBy(atMs - testScheduler.currentTime - 1)
+        runCurrent()
+        assertEquals("attempts just before ${atMs}ms", attemptsBefore, online.activateCalls)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals("attempts at ${atMs}ms", attemptsBefore + 1, online.activateCalls)
+    }
+
+    @Test
+    fun `failed switches to online back off 2, 5, 15, then every 30 minutes`() = runTest {
+        online.connectsOnActivate = false
+        network.status.value = NetworkStatus.ONLINE
+        started() // attempt 1 at 0 s, fails at 30 s
+        assertEquals(1, online.activateCalls)
+
+        var failedAt = 30_000L
+        var attempts = 1
+        for (wait in listOf(2L, 5L, 15L, 30L, 30L)) {
+            val next = failedAt + wait * 60_000
+            assertAttemptAt(next, attempts)
+            attempts++
+            failedAt = next + 30_000
+        }
+        assertEquals(6, online.activateCalls)
+    }
+
+    @Test
+    fun `the network coming back restarts the retries from the shortest wait`() = runTest {
+        online.connectsOnActivate = false
+        network.status.value = NetworkStatus.ONLINE
+        started()
+        assertAttemptAt(30_000 + 2 * 60_000, attemptsBefore = 1) // attempt 2, fails at 3 min
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertTrue(mode().state.value.onlineUnavailable) // now waiting 5 min
+
+        network.status.value = NetworkStatus.OFFLINE
+        runCurrent()
+        network.status.value = NetworkStatus.ONLINE
+        runCurrent()
+
+        assertEquals(3, online.activateCalls) // tried again at once
+        advanceTimeBy(30_000) // fails: the next wait is the shortest again
+        runCurrent()
+        assertAttemptAt(testScheduler.currentTime + 2 * 60_000, attemptsBefore = 3)
+    }
+
+    @Test
+    fun `a new wait replaces the earlier one, so waits never overlap`() = runTest {
+        online.connectsOnActivate = false
+        network.status.value = NetworkStatus.ONLINE
+        started() // fails at 30 s: the first wait would end at 2 min 30 s
+        advanceTimeBy(30_000)
+        runCurrent()
+
+        advanceTimeBy(30_000) // at 1 min, the network drops and comes back: try again at once
+        network.status.value = NetworkStatus.OFFLINE
+        runCurrent()
+        network.status.value = NetworkStatus.ONLINE
+        runCurrent()
+        assertEquals(2, online.activateCalls)
+        advanceTimeBy(30_000) // fails at 1 min 30 s: the new wait ends at 3 min 30 s
+        runCurrent()
+
+        // The first wait, had it survived, would have unblocked online at 2 min 30 s.
+        advanceTimeBy(90_000)
+        runCurrent()
+        assertEquals(2, online.activateCalls)
+        assertAttemptAt(210_000, attemptsBefore = 2)
+    }
+
+    @Test
+    fun `a retry waits while the merchant is on the charge screen`() = runTest {
+        online.connectsOnActivate = false
+        network.status.value = NetworkStatus.ONLINE
+        val mode = started()
+        advanceTimeBy(30_000)
+        runCurrent()
+        mode.enterChargeScreen()
+
+        advanceTimeBy(10 * 60_000)
+        runCurrent()
+        assertEquals(1, online.activateCalls)
+        assertEquals(OnlineWait.WAITING_IDLE, mode.state.value.onlineWait)
+
+        mode.leaveChargeScreen()
+        runCurrent()
+        assertEquals(2, online.activateCalls)
+    }
+
+    // --- a network that comes and goes ------------------------------------------------------------
+
+    @Test
+    fun `a network that drops every 30 seconds causes one switch, then online after 60 stable seconds`() = runTest {
+        network.status.value = NetworkStatus.ONLINE
+        val mode = started()
+        assertEquals(ONLINE, mode.state.value.mode)
+
+        repeat(10) { // 10 minutes: down 30 s, up 30 s
+            network.status.value = NetworkStatus.OFFLINE
+            advanceTimeBy(30_000)
+            runCurrent()
+            network.status.value = NetworkStatus.ONLINE
+            advanceTimeBy(30_000)
+            runCurrent()
+            assertEquals(OFFLINE, mode.state.value.mode)
+        }
+        assertEquals(1, saf.activateCalls) // the one switch to offline
+        assertEquals(1, online.activateCalls) // never back online while it flaps
+        assertEquals(OnlineWait.NETWORK_SETTLING, mode.state.value.onlineWait)
+
+        advanceTimeBy(30_001) // 60 s of stable network in all
+        runCurrent()
+        assertEquals(ONLINE, mode.state.value.mode)
+        assertEquals(2, online.activateCalls)
+    }
+
+    @Test
+    fun `a network that was down makes the next return a back online`() = runTest {
+        network.status.value = NetworkStatus.ONLINE
+        val mode = started()
+        assertFalse(mode.state.value.wasOffline)
+
+        network.status.value = NetworkStatus.OFFLINE
+        runCurrent()
+
+        assertTrue(mode.state.value.wasOffline)
+    }
+
+    @Test
+    fun `a fallback that cannot connect store and forward is reported`() = runTest {
+        online.connectsOnActivate = false
+        saf.connectsOnActivate = false
+        saf.connectionState.value = TerminalConnection.CONNECTED
+        network.status.value = NetworkStatus.ONLINE
+        val mode = started()
+
+        advanceTimeBy(60_000) // 30 s for online, then 30 s waiting for Store and Forward
+        runCurrent()
+
+        assertEquals(OFFLINE, mode.state.value.mode)
+        assertEquals(listOf("switch to online", "switch to offline"), errors.summary().map { it.first })
+    }
+
+    private lateinit var current: PaymentModeCoordinator
+    private fun mode() = current
 }

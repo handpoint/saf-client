@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.handpoint.safclient.di.IoDispatcher
 import com.handpoint.safclient.domain.ErrorReporter
+import com.handpoint.safclient.domain.PaymentModeCoordinator
 import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.model.DeleteResult
 import com.handpoint.safclient.domain.model.ProcessingStatus
@@ -40,12 +41,20 @@ data class SaleDetailUiState(
     val message: String? = null,
     val isLoading: Boolean = true,
     val deleting: Boolean = false,
+    /**
+     * Store and Forward is in use, so Handpoint can be asked about an offline sale. While the
+     * app takes online sales, Refresh status waits for offline mode.
+     */
+    val storeAndForwardActive: Boolean = true,
 ) {
     /**
      * Only an offline sale has a status to ask Handpoint for: an online sale was settled when
      * it was approved.
      */
     val canRefresh: Boolean get() = sale?.channel == SaleChannel.OFFLINE
+
+    /** An online sale whose outcome the app could not confirm: the merchant checks with Handpoint. */
+    val isUnconfirmed: Boolean get() = sale?.status == ProcessingStatus.UNKNOWN
 
     /** The journal has no sale with this reference. */
     val notFound: Boolean get() = !isLoading && sale == null && !deleting
@@ -58,6 +67,7 @@ class SaleDetailViewModel @Inject constructor(
     journal: SalesJournal,
     private val refresh: RefreshSaleStatus,
     private val delete: DeleteStoredSale,
+    payments: PaymentModeCoordinator,
     @param:IoDispatcher private val io: CoroutineDispatcher,
     private val errors: ErrorReporter,
 ) : ViewModel() {
@@ -73,7 +83,8 @@ class SaleDetailViewModel @Inject constructor(
         refreshing,
         deleting,
         message,
-    ) { sale, refreshing, deleting, message ->
+        payments.state,
+    ) { sale, refreshing, deleting, message, mode ->
         SaleDetailUiState(
             sale = sale,
             refreshing = refreshing,
@@ -81,6 +92,7 @@ class SaleDetailViewModel @Inject constructor(
             message = message,
             isLoading = false,
             deleting = deleting,
+            storeAndForwardActive = mode.isStoreAndForwardReady,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), SaleDetailUiState())
 
@@ -91,7 +103,8 @@ class SaleDetailViewModel @Inject constructor(
 
     /** Asks Handpoint for the sale's status. A tap while a refresh runs is ignored. */
     fun refreshStatus() {
-        if (refreshing.value || !uiState.value.canRefresh) return
+        val state = uiState.value
+        if (refreshing.value || !state.canRefresh || !state.storeAndForwardActive) return
         refreshing.value = true
         viewModelScope.launch {
             try {

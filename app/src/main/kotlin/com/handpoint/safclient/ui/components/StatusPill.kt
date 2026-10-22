@@ -35,6 +35,7 @@ fun ProcessingStatus.label(): String = when (this) {
     ProcessingStatus.REFUNDED -> "Refunded"
     ProcessingStatus.CANCELLED -> "Cancelled"
     ProcessingStatus.NOT_FOUND -> "Unknown"
+    ProcessingStatus.UNKNOWN -> "Check with Handpoint"
 }
 
 @Composable
@@ -45,6 +46,8 @@ private fun ProcessingStatus.tone(): Tone {
         ProcessingStatus.IN_PROGRESS -> colors.processing
         ProcessingStatus.SUCCEEDED, ProcessingStatus.CAPTURED -> colors.paid
         ProcessingStatus.FAILED -> colors.failed
+        // Needs the merchant's attention, like a sale not sent yet.
+        ProcessingStatus.UNKNOWN -> colors.stored
         ProcessingStatus.REFUNDED, ProcessingStatus.CANCELLED, ProcessingStatus.NOT_FOUND -> colors.neutral
     }
 }

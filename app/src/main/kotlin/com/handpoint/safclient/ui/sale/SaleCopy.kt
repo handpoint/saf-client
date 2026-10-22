@@ -43,7 +43,7 @@ fun resultCopy(outcome: SaleOutcome, currency: Currency): ResultCopy = when (out
     is SaleOutcome.DeclinedOnline -> ResultCopy(
         kind = ResultKind.DECLINED,
         title = "Declined",
-        body = outcome.message,
+        body = outcome.message.ifBlank { outcome.reason.onlineMessage(currency) },
         canPrint = false,
         canTryAgain = true,
     )
@@ -97,6 +97,19 @@ private fun DeclineReason.message(currency: Currency): String = when (this) {
         "This terminal doesn't take offline sales in ${currency.currencyCode}. Ask Handpoint to check the terminal's currency."
     DeclineReason.CARD_NOT_ACCEPTED -> "This card isn't accepted."
     DeclineReason.OTHER -> "The sale couldn't be completed."
+}
+
+/** An online decline in the app's words, when the SDK gave no readable message. */
+private fun DeclineReason.onlineMessage(currency: Currency): String = when (this) {
+    DeclineReason.CARD_EXPIRED -> "The card has expired. Ask for another card."
+    DeclineReason.CARD_NOT_ACCEPTED -> "This card isn't accepted. Ask for another way to pay."
+    DeclineReason.CURRENCY_NOT_ACCEPTED ->
+        "This terminal doesn't take sales in ${currency.currencyCode}. Ask Handpoint to check the terminal's currency."
+    DeclineReason.PREPAID_CARD,
+    DeclineReason.CARD_LIMIT_REACHED,
+    DeclineReason.TERMINAL_LIMIT_REACHED,
+    DeclineReason.OTHER,
+    -> "The card was declined. Ask for another way to pay."
 }
 
 /** What the terminal is waiting for, in merchant words. `null` before the first prompt. */

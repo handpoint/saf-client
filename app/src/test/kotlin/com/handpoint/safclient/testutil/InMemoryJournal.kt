@@ -25,7 +25,13 @@ class InMemoryJournal(vararg initial: Sale) : SalesJournal {
 
     override suspend fun find(reference: SaleReference): Sale? = sales.value[reference]
 
-    override suspend fun record(sale: Sale) = sales.update { it + (sale.reference to sale) }
+    /** Thrown by [record] when set, as when the disk is full. */
+    var failRecord: Exception? = null
+
+    override suspend fun record(sale: Sale) {
+        failRecord?.let { throw it }
+        sales.update { it + (sale.reference to sale) }
+    }
 
     override suspend fun markSent(reference: SaleReference, at: Instant) = sales.update { all ->
         val sale = all[reference]

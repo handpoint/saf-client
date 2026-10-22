@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.NetworkStatus
+import com.handpoint.safclient.domain.model.OnlineWait
 import com.handpoint.safclient.domain.model.PaymentMode
 import com.handpoint.safclient.ui.theme.SafTheme
 import org.junit.Assert.assertEquals
@@ -27,7 +28,7 @@ class ConnectivityBannerTest {
 
     private val online = ModeState(mode = PaymentMode.ONLINE, network = NetworkStatus.ONLINE)
     private val offline = ModeState(mode = PaymentMode.OFFLINE, network = NetworkStatus.OFFLINE)
-    private val backOnline = ModeState(mode = PaymentMode.OFFLINE, network = NetworkStatus.ONLINE)
+    private val backOnline = ModeState(mode = PaymentMode.OFFLINE, network = NetworkStatus.ONLINE, wasOffline = true)
 
     private fun show(state: ModeState, waiting: Int = 0, sendEnabled: Boolean = true, withSend: Boolean = true) =
         compose.setContent {
@@ -50,8 +51,14 @@ class ConnectivityBannerTest {
         assertEquals(BannerKind.SWITCHING_TO_OFFLINE, bannerKind(online.copy(switchingTo = PaymentMode.OFFLINE), 0))
         assertEquals(BannerKind.SWITCHING_TO_ONLINE, bannerKind(backOnline.copy(switchingTo = PaymentMode.ONLINE), 0))
         assertEquals(BannerKind.WAITING_TO_SEND, bannerKind(backOnline, 2))
-        // Network back, nothing waiting: the switch to online comes once the app is idle.
-        assertEquals(BannerKind.SWITCHING_TO_ONLINE, bannerKind(backOnline, 0))
+        // Network back, nothing waiting, no switch yet: no progress, sales are still stored.
+        assertEquals(BannerKind.STORED_FOR_NOW, bannerKind(backOnline, 0))
+        assertEquals(BannerKind.STORED_FOR_NOW, bannerKind(backOnline.copy(onlineWait = OnlineWait.AWAITING_TERMINAL), 0))
+        assertEquals(BannerKind.STORED_FOR_NOW, bannerKind(backOnline.copy(onlineWait = OnlineWait.WAITING_IDLE), 0))
+        assertEquals(BannerKind.STORED_FOR_NOW, bannerKind(backOnline.copy(onlineWait = OnlineWait.NETWORK_SETTLING), 0))
+        assertEquals(BannerKind.CHECKING_SENT_SALES, bannerKind(backOnline.copy(onlineWait = OnlineWait.BUSY_FOLLOW_UP), 0))
+        // Online, but the network dropped during a sale: the switch waits for the sale.
+        assertEquals(BannerKind.NO_CONNECTION_SWITCH_PENDING, bannerKind(online.copy(network = NetworkStatus.OFFLINE), 0))
         assertEquals(BannerKind.ONLINE_UNAVAILABLE, bannerKind(backOnline.copy(onlineUnavailable = true), 0))
         // Sales waiting matter more than a failed online switch: they can be sent.
         assertEquals(BannerKind.WAITING_TO_SEND, bannerKind(backOnline.copy(onlineUnavailable = true), 1))
@@ -118,5 +125,38 @@ class ConnectivityBannerTest {
     fun aFailedSwitchToOnlineIsExplained() {
         show(backOnline.copy(onlineUnavailable = true))
         compose.onNodeWithText("Online sales unavailable · Sales are stored on this terminal and sent later").assertExists()
+    }
+
+    @Test
+    fun atColdStartTheSwitchToOnlineIsNotABackOnline() {
+        show(backOnline.copy(switchingTo = PaymentMode.ONLINE, wasOffline = false))
+        compose.onNodeWithText("Getting online sales ready…").assertExists()
+    }
+
+    @Test
+    fun atColdStartWaitingSalesAreNotABackOnline() {
+        show(backOnline.copy(wasOffline = false), waiting = 2)
+        compose.onNodeWithText("2 sales waiting to send").assertExists()
+    }
+
+    @Test
+    fun theFollowUpSaysWhatItDoesWithoutProgress() {
+        show(backOnline.copy(onlineWait = OnlineWait.BUSY_FOLLOW_UP))
+        compose.onNodeWithText("Online · checking sent sales, then online sales start").assertExists()
+        compose.onNodeWithTag(BANNER_PROGRESS_TAG).assertDoesNotExist()
+    }
+
+    @Test
+    fun awaitingTheTerminalSaysSalesAreStoredForNowWithoutProgress() {
+        show(backOnline.copy(onlineWait = OnlineWait.AWAITING_TERMINAL, wasOffline = false))
+        compose.onNodeWithText("Online · sales are stored offline for now").assertExists()
+        compose.onNodeWithTag(BANNER_PROGRESS_TAG).assertDoesNotExist()
+    }
+
+    @Test
+    fun aDroppedNetworkDuringAnOnlineSaleSaysTheSwitchComesAfterIt() {
+        show(online.copy(network = NetworkStatus.OFFLINE))
+        compose.onNodeWithText("No connection · switching after this sale").assertExists()
+        compose.onNodeWithText("Online").assertDoesNotExist()
     }
 }

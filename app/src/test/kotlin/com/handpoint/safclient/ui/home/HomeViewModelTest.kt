@@ -85,6 +85,7 @@ class HomeViewModelTest {
             errors = errors,
             io = dispatcher,
         )
+        payments.start() // SafClientApp does this at app start
         val viewModel = HomeViewModel(journal, payments, settings, reconcile, statuses, send, clock, dispatcher, errors)
         backgroundScope.launch(dispatcher) { viewModel.uiState.collect {} }
         return viewModel to send

@@ -100,11 +100,21 @@ internal fun TransactionResult.toOnlineOutcome(amount: Money, now: Instant): Sal
             ),
         )
 
-        FinancialStatus.DECLINED -> SaleOutcome.DeclinedOnline(errorMessage.ifBlank { "Declined" })
+        // The message is shown as it is, unless it is blank or a raw key ("EXPIRED_CARD"):
+        // then the reason the key gives lets the app say it in its own words.
+        FinancialStatus.DECLINED -> SaleOutcome.DeclinedOnline(
+            message = errorMessage.takeUnless { it.isBlank() || it.isRawKey() }.orEmpty(),
+            reason = declineReason(),
+        )
         FinancialStatus.CANCELLED -> SaleOutcome.Cancelled
         FinancialStatus.FAILED -> SaleOutcome.Failed(errorMessage.ifBlank { "The sale failed" })
-        else -> SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN)
+        else -> SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN, transactionReference.toReferenceOrNull())
     }
+
+/** An untranslated SDK key such as `EXPIRED_CARD`, not a sentence for people. */
+private fun String.isRawKey(): Boolean = matches(Regex("[A-Z0-9_]+"))
+
+internal fun String.toReferenceOrNull(): SaleReference? = takeIf { it.isNotBlank() }?.let(::SaleReference)
 
 /**
  * The SDK translates `errorMessage` into the card or device language ("PREPAID_CARD" becomes

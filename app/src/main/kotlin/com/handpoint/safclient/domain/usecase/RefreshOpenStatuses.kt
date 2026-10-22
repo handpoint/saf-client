@@ -4,6 +4,7 @@ import com.handpoint.safclient.domain.ApplicationScope
 import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -26,8 +27,9 @@ import kotlin.time.Duration.Companion.seconds
  * Asks Handpoint for the result of sales that were forwarded but have no final status yet,
  * and keeps the load on Handpoint low:
  *
- * - It asks only about open sales (IN_PROGRESS or NOT_FOUND) sent in the last [WINDOW]. It
- *   never asks again about a sale with a final status.
+ * - It asks only about open offline sales (IN_PROGRESS or NOT_FOUND) sent in the last [WINDOW].
+ *   It never asks again about a sale with a final status, nor about an online sale (they are
+ *   not Store and Forward sales; an UNKNOWN one is checked by the merchant with Handpoint).
  * - It asks about one sale at a time, newest first, and at most [MAX_PER_PASS] per pass.
  * - A pass stops at the first sale with no answer: without network, the rest would fail too.
  * - After a forwarding run, [followUp] asks about the sales just sent at each time in
@@ -89,7 +91,7 @@ class RefreshOpenStatuses @Inject constructor(
             for (at in FOLLOW_UP_AT) {
                 delay(at - waited)
                 waited = at
-                val open = sent.mapNotNull { journal.find(it) }.filter { it.status in OPEN }
+                val open = sent.mapNotNull { journal.find(it) }.filter { it.isOpen() }
                 if (open.isEmpty()) return@launch
                 passes.withLock { ask(open.take(MAX_PER_PASS)) }
             }
@@ -112,10 +114,12 @@ class RefreshOpenStatuses @Inject constructor(
     private suspend fun openSales(): List<Sale> {
         val now = clock.instant()
         return journal.observeAll().first()
-            .filter { it.status in OPEN && Duration.between(it.sentAt ?: it.approvedAt, now) <= WINDOW }
+            .filter { it.isOpen() && Duration.between(it.sentAt ?: it.approvedAt, now) <= WINDOW }
             .sortedByDescending { it.sentAt ?: it.approvedAt }
             .take(MAX_PER_PASS)
     }
+
+    private fun Sale.isOpen(): Boolean = channel == SaleChannel.OFFLINE && status in OPEN
 
     private suspend fun ask(sales: List<Sale>): Int {
         var asked = 0

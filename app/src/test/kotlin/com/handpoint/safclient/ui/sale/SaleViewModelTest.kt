@@ -71,7 +71,7 @@ class SaleViewModelTest {
     ): SaleViewModel {
         reconcile = ReconcileStoredSales(saf, journal, settings, clock)
         mode = paymentMode(saf, journal, clock, online = online, network = network, reconcile = reconcile, io = dispatcher)
-        val takeSale = TakeSale(saf, online, journal, reconcile, mode)
+        val takeSale = TakeSale(saf, online, journal, reconcile, mode, clock, errors)
         return SaleViewModel(takeSale, mode, settings, dispatcher, errors)
     }
 

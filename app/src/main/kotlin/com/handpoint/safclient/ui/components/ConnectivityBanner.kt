@@ -42,6 +42,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.NetworkStatus
+import com.handpoint.safclient.domain.model.OnlineWait
 import com.handpoint.safclient.domain.model.PaymentMode
 import com.handpoint.safclient.ui.theme.SafPreviewSurface
 import com.handpoint.safclient.ui.theme.SafPreviews
@@ -62,6 +63,15 @@ enum class BannerKind {
     /** No network: sales are stored on the terminal. */
     NO_CONNECTION,
 
+    /** No network, but a sale still runs online: the switch to offline comes after it. */
+    NO_CONNECTION_SWITCH_PENDING,
+
+    /** Network up, but Handpoint is asked about the sales just sent first (needs Store and Forward). */
+    CHECKING_SENT_SALES,
+
+    /** Network up, but sales are still stored for now (the terminal has not answered, a task runs, or the network just came back). */
+    STORED_FOR_NOW,
+
     /** The network is back, and sales stored offline wait to be sent. */
     WAITING_TO_SEND,
 
@@ -75,18 +85,20 @@ enum class BannerKind {
 /**
  * Which banner to show for [state], with [waitingToSend] sales stored on the terminal.
  *
- * With the network back and nothing waiting, the app is about to switch to online sales (it
- * waits until no sale, send or status check runs), so the banner already says it is getting
- * ready.
+ * Only a switch in progress shows progress. Every other state says what is true now, and agrees
+ * with the Charge label: while the mode is offline, the banner says sales are stored.
  */
 fun bannerKind(state: ModeState, waitingToSend: Int): BannerKind = when {
     state.switchingTo == PaymentMode.OFFLINE -> BannerKind.SWITCHING_TO_OFFLINE
     state.switchingTo == PaymentMode.ONLINE -> BannerKind.SWITCHING_TO_ONLINE
+    state.mode == PaymentMode.ONLINE && state.network == NetworkStatus.OFFLINE ->
+        BannerKind.NO_CONNECTION_SWITCH_PENDING
     state.mode == PaymentMode.ONLINE -> BannerKind.ONLINE
     state.network == NetworkStatus.OFFLINE -> BannerKind.NO_CONNECTION
     waitingToSend > 0 -> BannerKind.WAITING_TO_SEND
     state.onlineUnavailable -> BannerKind.ONLINE_UNAVAILABLE
-    else -> BannerKind.SWITCHING_TO_ONLINE
+    state.onlineWait == OnlineWait.BUSY_FOLLOW_UP -> BannerKind.CHECKING_SENT_SALES
+    else -> BannerKind.STORED_FOR_NOW
 }
 
 /**
@@ -126,10 +138,17 @@ fun ConnectivityBanner(
         when (current) {
             BannerKind.ONLINE -> OnlineBanner()
             BannerKind.NO_CONNECTION -> StoringBanner(title = "No connection")
+            BannerKind.NO_CONNECTION_SWITCH_PENDING ->
+                StoringBanner(title = "No connection", detail = "switching after this sale")
             BannerKind.ONLINE_UNAVAILABLE -> StoringBanner(title = "Online sales unavailable")
-            BannerKind.SWITCHING_TO_ONLINE -> SwitchingBanner("Back online · getting ready…", animate)
+            BannerKind.CHECKING_SENT_SALES -> InfoBanner("Online · checking sent sales, then online sales start")
+            BannerKind.STORED_FOR_NOW -> InfoBanner("Online · sales are stored offline for now")
+            BannerKind.SWITCHING_TO_ONLINE -> SwitchingBanner(
+                if (state.wasOffline) "Back online · getting ready…" else "Getting online sales ready…",
+                animate,
+            )
             BannerKind.SWITCHING_TO_OFFLINE -> SwitchingBanner("Switching to offline sales…", animate)
-            BannerKind.WAITING_TO_SEND -> WaitingBanner(waitingToSend, onSendNow, sendEnabled)
+            BannerKind.WAITING_TO_SEND -> WaitingBanner(waitingToSend, state.wasOffline, onSendNow, sendEnabled)
         }
     }
 }
@@ -153,7 +172,7 @@ private fun OnlineBanner() {
 
 /** Amber and persistent: sales are stored on the terminal, not charged yet. */
 @Composable
-private fun StoringBanner(title: String) {
+private fun StoringBanner(title: String, detail: String = "Sales are stored on this terminal and sent later") {
     BannerSurface(SafTheme.colors.stored) {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Dot(LocalContentColor.current)
@@ -161,11 +180,23 @@ private fun StoringBanner(title: String) {
             Text(
                 text = buildAnnotatedString {
                     withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(title) }
-                    append(" · Sales are stored on this terminal and sent later")
+                    append(" · $detail")
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
+    }
+}
+
+/** A plain note, without progress: nothing is switching right now. */
+@Composable
+private fun InfoBanner(text: String) {
+    BannerSurface(SafTheme.colors.processing) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+        )
     }
 }
 
@@ -195,14 +226,15 @@ private fun SwitchingBanner(text: String, animate: Boolean) {
 }
 
 @Composable
-private fun WaitingBanner(waiting: Int, onSendNow: (() -> Unit)?, sendEnabled: Boolean) {
+private fun WaitingBanner(waiting: Int, backOnline: Boolean, onSendNow: (() -> Unit)?, sendEnabled: Boolean) {
     BannerSurface(SafTheme.colors.processing) {
         Row(
             modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Back online · " + if (waiting == 1) "1 sale waiting to send" else "$waiting sales waiting to send",
+                text = (if (backOnline) "Back online · " else "") +
+                    if (waiting == 1) "1 sale waiting to send" else "$waiting sales waiting to send",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier
                     .weight(1f)
@@ -260,8 +292,9 @@ private fun ConnectivityBannerPreview() = SafPreviewSurface {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ConnectivityBanner(ModeState(mode = PaymentMode.ONLINE, network = NetworkStatus.ONLINE), 0)
         ConnectivityBanner(ModeState(network = NetworkStatus.OFFLINE), 2)
-        ConnectivityBanner(back.copy(switchingTo = PaymentMode.ONLINE), 0)
-        ConnectivityBanner(back, 3, onSendNow = {})
+        ConnectivityBanner(back.copy(switchingTo = PaymentMode.ONLINE, wasOffline = true), 0)
+        ConnectivityBanner(back.copy(onlineWait = OnlineWait.BUSY_FOLLOW_UP), 0)
+        ConnectivityBanner(back.copy(wasOffline = true), 3, onSendNow = {})
         ConnectivityBanner(back.copy(onlineUnavailable = true), 0)
     }
 }

@@ -192,7 +192,7 @@ class HomeScreenTest {
 
     @Test
     fun backOnlineWithSalesWaitingOffersSendNowInTheBanner() {
-        show(waiting.copy(pendingCount = 2, mode = ModeState(network = NetworkStatus.ONLINE)))
+        show(waiting.copy(pendingCount = 2, mode = ModeState(network = NetworkStatus.ONLINE, wasOffline = true)))
         compose.onNodeWithText("Back online · 2 sales waiting to send").assertExists()
         compose.onNode(hasText("Send now") and hasAnyAncestor(hasTestTag(CONNECTIVITY_BANNER_TAG))).performClick()
         assertEquals(1, sendClicks)
@@ -200,7 +200,7 @@ class HomeScreenTest {
 
     @Test
     fun newSaleIsDisabledWhileSwitching() {
-        val switching = online.copy(mode = PaymentMode.OFFLINE, switchingTo = PaymentMode.ONLINE)
+        val switching = online.copy(mode = PaymentMode.OFFLINE, switchingTo = PaymentMode.ONLINE, wasOffline = true)
         show(waiting.copy(pendingCount = 0, pending = null, stored = emptyList(), mode = switching))
         compose.onNodeWithText("Back online · getting ready…").assertExists()
         compose.onNodeWithText("New sale").assertIsNotEnabled()

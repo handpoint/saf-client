@@ -130,4 +130,26 @@ class SaleDetailScreenTest {
         compose.onNodeWithText("Approved offline", substring = true).assertExists()
         compose.onNodeWithText("Offline").assertExists()
     }
+
+    @Test
+    fun anUnconfirmedOnlineSaleSaysToCheckWithHandpoint() {
+        val unconfirmed = sale("7c1e2b1a-5d4f-4a2e-9b7d-3f0c8e6da91f", ProcessingStatus.UNKNOWN)
+            .copy(channel = SaleChannel.ONLINE)
+        show(SaleDetailUiState(sale = unconfirmed, isLoading = false))
+
+        compose.onNodeWithText(
+            "We couldn't confirm this sale. Check with Handpoint before charging the customer again.",
+        ).assertExists()
+        compose.onNodeWithText("Check with Handpoint").assertExists()
+        compose.onNodeWithText("Refresh status").assertDoesNotExist()
+    }
+
+    @Test
+    fun refreshWaitsForOfflineModeWhileTheAppIsOnline() {
+        show(stateFor(ProcessingStatus.IN_PROGRESS).copy(storeAndForwardActive = false))
+
+        compose.onNodeWithText("Refresh status").assertIsNotEnabled().performClick()
+        compose.onNodeWithText("Available when the app is in offline mode").assertExists()
+        assertEquals(0, refreshes)
+    }
 }

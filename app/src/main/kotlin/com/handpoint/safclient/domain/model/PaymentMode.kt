@@ -8,6 +8,21 @@ package com.handpoint.safclient.domain.model
  */
 enum class PaymentMode { ONLINE, OFFLINE }
 
+/** Why the app still stores sales offline although the network is up and nothing waits to be sent. */
+enum class OnlineWait {
+    /** The terminal has not said yet which sales it stores. */
+    AWAITING_TERMINAL,
+
+    /** Handpoint is being asked about the sales just sent; that needs Store and Forward. */
+    BUSY_FOLLOW_UP,
+
+    /** A sale or a send is running, or the merchant is on the charge screen. */
+    WAITING_IDLE,
+
+    /** The network dropped recently: the app waits until it has been stable for a while. */
+    NETWORK_SETTLING,
+}
+
 /**
  * The payment mode and what the app needs to explain it to the merchant.
  *
@@ -19,6 +34,9 @@ enum class PaymentMode { ONLINE, OFFLINE }
  *   and the terminal's last answer).
  * @property onlineUnavailable the last switch to online failed; the app stays offline and tries
  *   again later.
+ * @property onlineWait why the app is not switching to online although it could; `null` otherwise.
+ * @property wasOffline the network has been down at least once since the app started, so its
+ *   return is a "back online".
  */
 data class ModeState(
     val mode: PaymentMode = PaymentMode.OFFLINE,
@@ -26,6 +44,8 @@ data class ModeState(
     val network: NetworkStatus = NetworkStatus.OFFLINE,
     val waitingToSend: Int = 0,
     val onlineUnavailable: Boolean = false,
+    val onlineWait: OnlineWait? = null,
+    val wasOffline: Boolean = false,
 ) {
     val isSwitching: Boolean get() = switchingTo != null
 

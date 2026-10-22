@@ -21,6 +21,7 @@ import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.testutil.RecordingErrorReporter
+import com.handpoint.safclient.domain.model.ProcessingStatus
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -44,6 +45,7 @@ class TakeSaleTest {
     private val network = FakeNetworkMonitor(NetworkStatus.OFFLINE)
     private val journal = InMemoryJournal()
     private val reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock)
+    private val errors = RecordingErrorReporter()
 
     private lateinit var mode: PaymentModeCoordinator
 
@@ -61,7 +63,7 @@ class TakeSaleTest {
             appScope = backgroundScope,
             io = StandardTestDispatcher(testScheduler),
         )
-        return TakeSale(terminal, online, journal, reconcile, mode)
+        return TakeSale(terminal, online, journal, reconcile, mode, clock, errors)
     }
 
     /** Network up and nothing stored: the coordinator switches to the online API. */
@@ -153,6 +155,54 @@ class TakeSaleTest {
 
         assertEquals(SaleOutcome.DeclinedOnline("Insufficient funds"), takeSale(Money(1000, USD)))
         assertTrue(journal.observeAll().first().isEmpty())
+    }
+
+    @Test
+    fun `an unknown online outcome leaves an online trace to check with Handpoint`() = runTest {
+        val takeSale = takeSale()
+        goOnline()
+        online.saleOutcome = SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN, SaleReference("U"))
+
+        takeSale(Money(1250, USD))
+
+        val trace = journal.find(SaleReference("U"))!!
+        assertEquals(SaleChannel.ONLINE, trace.channel)
+        assertEquals(ProcessingStatus.UNKNOWN, trace.status)
+        assertEquals(Money(1250, USD), trace.amount)
+        assertEquals(clock.instant(), trace.approvedAt)
+    }
+
+    @Test
+    fun `an unknown online outcome without a reference leaves no row`() = runTest {
+        val takeSale = takeSale()
+        goOnline()
+        online.saleOutcome = SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN)
+
+        takeSale(Money(1250, USD))
+
+        assertTrue(journal.observeAll().first().isEmpty())
+    }
+
+    @Test
+    fun `an error after an online sale started ends as the online unknown outcome and is reported`() = runTest {
+        val takeSale = takeSale()
+        goOnline()
+        online.saleOutcome = SaleOutcome.ApprovedOnline(sale("ON", SUCCEEDED).copy(channel = SaleChannel.ONLINE))
+        journal.failRecord = IllegalStateException("disk full")
+
+        assertEquals(SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN), takeSale(Money(1000, USD)))
+        assertEquals(listOf("sale" to "disk full"), errors.summary())
+        // The sale ended: the mode is free again.
+        assertEquals(PaymentMode.ONLINE, mode.beginSale())
+    }
+
+    @Test
+    fun `an error during an offline sale ends as the offline unknown outcome`() = runTest {
+        val takeSale = takeSale()
+        terminal.saleOutcome = SaleOutcome.ApprovedOffline(sale("A"))
+        journal.failRecord = IllegalStateException("disk full")
+
+        assertEquals(SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN), takeSale(Money(1000, USD)))
     }
 
     @Test

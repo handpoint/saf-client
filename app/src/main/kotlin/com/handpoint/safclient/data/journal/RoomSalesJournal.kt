@@ -34,7 +34,7 @@ class RoomSalesJournal(private val dao: SaleDao) : SalesJournal {
     override suspend fun markStored(reference: SaleReference) = dao.markStored(
         reference = reference.value,
         stored = ProcessingStatus.STORED.name,
-        open = ProcessingStatus.entries.filter { !it.isFinal && it != ProcessingStatus.STORED }.map { it.name },
+        open = listOf(ProcessingStatus.IN_PROGRESS, ProcessingStatus.NOT_FOUND).map { it.name },
     )
 
     override suspend fun updateStatus(reference: SaleReference, status: ProcessingStatus, at: Instant) =

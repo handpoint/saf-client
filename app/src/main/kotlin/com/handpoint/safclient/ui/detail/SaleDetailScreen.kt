@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -154,7 +155,21 @@ fun SaleDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     if (state.canRefresh) {
-                        SecondaryButton(text = "Refresh status", onClick = onRefresh, loading = state.refreshing)
+                        SecondaryButton(
+                            text = "Refresh status",
+                            onClick = onRefresh,
+                            loading = state.refreshing,
+                            enabled = state.storeAndForwardActive,
+                        )
+                        if (!state.storeAndForwardActive) {
+                            Text(
+                                text = "Available when the app is in offline mode",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = SafTheme.colors.textMuted,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                     if (state.canDelete) {
                         TextButton(
@@ -173,7 +188,7 @@ fun SaleDetailScreen(
         },
     ) { padding ->
         when {
-            sale != null -> SaleDetails(sale, snackbar, Modifier.padding(padding))
+            sale != null -> SaleDetails(sale, state.isUnconfirmed, snackbar, Modifier.padding(padding))
             state.notFound -> Box(
                 Modifier
                     .fillMaxSize()
@@ -210,7 +225,7 @@ fun SaleDetailScreen(
 }
 
 @Composable
-private fun SaleDetails(sale: Sale, snackbar: SnackbarHostState, modifier: Modifier = Modifier) {
+private fun SaleDetails(sale: Sale, unconfirmed: Boolean, snackbar: SnackbarHostState, modifier: Modifier = Modifier) {
     Column(
         modifier
             .fillMaxSize()
@@ -227,9 +242,28 @@ private fun SaleDetails(sale: Sale, snackbar: SnackbarHostState, modifier: Modif
         ) {
             AmountText(sale.amount, SafTheme.amounts.hero)
         }
+        if (unconfirmed) UnconfirmedNotice()
         Timeline(sale.timeline())
         InfoCard(sale, snackbar)
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/** An online sale the app could not confirm: say what to do, before anything else. */
+@Composable
+private fun UnconfirmedNotice() {
+    val tone = SafTheme.colors.stored
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = tone.container,
+        contentColor = tone.content,
+    ) {
+        Text(
+            text = "We couldn't confirm this sale. Check with Handpoint before charging the customer again.",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(16.dp),
+        )
     }
 }
 
@@ -241,10 +275,17 @@ private data class TimelineStep(val label: String, val at: Instant?, val done: B
  * Handpoint at once: there is no sending step.
  */
 private fun Sale.timeline(): List<TimelineStep> = when (channel) {
-    SaleChannel.ONLINE -> listOf(
-        TimelineStep("Approved online", approvedAt, done = true),
-        TimelineStep(status.label(), statusCheckedAt, done = true),
-    )
+    SaleChannel.ONLINE -> if (status == ProcessingStatus.UNKNOWN) {
+        listOf(
+            TimelineStep("Started online", approvedAt, done = true),
+            TimelineStep("Not confirmed", null, done = false),
+        )
+    } else {
+        listOf(
+            TimelineStep("Approved online", approvedAt, done = true),
+            TimelineStep(status.label(), statusCheckedAt, done = true),
+        )
+    }
     SaleChannel.OFFLINE -> listOf(
         TimelineStep("Approved offline", approvedAt, done = true),
         TimelineStep("Sent to Handpoint", sentAt, done = sentAt != null),

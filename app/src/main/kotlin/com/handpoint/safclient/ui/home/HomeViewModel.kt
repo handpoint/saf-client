@@ -75,8 +75,8 @@ data class HomeUiState(
  * terminal stored without reporting it still shows and can be sent. The journal counts when it
  * holds more (a sale taken after that answer), unless its total is in another currency.
  *
- * When the screen opens it starts the payment mode rule ([PaymentModeCoordinator]), connects the
- * payment API in use (unless it is connected already), makes the journal agree with the
+ * When the screen opens it connects the payment API in use ([PaymentModeCoordinator], started by
+ * `SafClientApp`) (unless it is connected already), makes the journal agree with the
  * terminal, and then asks Handpoint about the sales whose outcome is still open
  * ([RefreshOpenStatuses]). Each time the screen comes back to the front it reconciles again, at
  * most every [RECONCILE_INTERVAL], and asks about open sales again, at most every
@@ -137,7 +137,6 @@ class HomeViewModel @Inject constructor(
     private var connecting: Job
 
     init {
-        payments.start()
         connecting = connectInBackground()
         // connect() returns before the SDK has finished its set-up, and the terminal's answer
         // is only right once it is connected. So reconcile each time Store and Forward becomes

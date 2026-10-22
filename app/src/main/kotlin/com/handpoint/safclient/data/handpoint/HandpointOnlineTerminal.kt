@@ -131,7 +131,7 @@ class HandpointOnlineTerminal(
             }
             ended = result != null
             return result?.toOnlineOutcome(amount, clock.instant())
-                ?: SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN)
+                ?: SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN, reference.toReferenceOrNull())
         } finally {
             // Runs on timeout and on cancellation; a CancellationException still propagates.
             if (!ended) hapi.stopCurrentTransaction()

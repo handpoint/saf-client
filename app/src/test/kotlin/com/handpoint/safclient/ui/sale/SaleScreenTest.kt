@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import com.handpoint.safclient.domain.OnlineTerminal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.CardStep
+import com.handpoint.safclient.domain.model.DeclineReason
 import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.NetworkStatus
@@ -142,5 +143,19 @@ class SaleScreenTest {
 
         compose.onNodeWithText("The card may have been charged. Check the transaction with Handpoint before charging again.").assertExists()
         compose.onNodeWithText("Try again").assertDoesNotExist()
+    }
+
+    @Test
+    fun anOnlineDeclineWithoutAMessageSaysDeclinedInPlainWords() {
+        show(Money(1250, USD), ChargeUiState.Result(SaleOutcome.DeclinedOnline("")))
+
+        compose.onNodeWithText("The card was declined. Ask for another way to pay.").assertExists()
+    }
+
+    @Test
+    fun anOnlineDeclineWithAKnownKeyExplainsIt() {
+        show(Money(1250, USD), ChargeUiState.Result(SaleOutcome.DeclinedOnline("", DeclineReason.CARD_EXPIRED)))
+
+        compose.onNodeWithText("The card has expired. Ask for another card.").assertExists()
     }
 }

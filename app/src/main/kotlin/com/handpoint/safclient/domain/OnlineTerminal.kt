@@ -25,8 +25,9 @@ interface OnlineTerminal : PaymentTerminal {
      * When no result arrives within 180 seconds, or the caller is cancelled, the sale is asked
      * to stop and `sale` returns [SaleOutcome.Failed] with message [OUTCOME_UNKNOWN] (a
      * cancelled caller gets the cancellation). Any result the app does not expect is also
-     * [OUTCOME_UNKNOWN]. **Outcome unknown** means the card may have been charged: do not
-     * charge again before you know.
+     * [OUTCOME_UNKNOWN]. The failure carries the sale's reference when the sale started.
+     * **Outcome unknown** means the card may have been charged: do not charge again before you
+     * know.
      */
     suspend fun sale(amount: Money): SaleOutcome
 

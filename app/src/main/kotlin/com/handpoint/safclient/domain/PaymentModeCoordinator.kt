@@ -3,6 +3,7 @@ package com.handpoint.safclient.domain
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.NetworkStatus
+import com.handpoint.safclient.domain.model.OnlineWait
 import com.handpoint.safclient.domain.model.PaymentMode
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.StoredSummary
@@ -13,6 +14,7 @@ import com.handpoint.safclient.domain.usecase.SendStoredSales
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,9 +63,17 @@ import kotlin.time.Duration.Companion.seconds
  * A switch deactivates one API, activates the other and waits for it to be CONNECTED (about 5
  * to 10 seconds; see [PaymentTerminal]). If the online API is not connected after
  * [SWITCH_TIMEOUT], or cannot be created, the app goes back to Store and Forward, reports the
- * error, and tries online again after [RETRY_ONLINE_AFTER].
+ * error, and tries online again later, waiting longer after each failure
+ * ([RETRY_ONLINE_DELAYS]: 2, 5, 15, then every 30 minutes). A retry never starts while the
+ * merchant is on the charge screen. When the network comes back after a drop, the wait starts
+ * again from the shortest.
  *
- * Call [start] once (Home does); it runs in [appScope] for as long as the app runs.
+ * After a switch to Store and Forward caused by a network drop, the network must stay up for
+ * [STABLE_NETWORK_FOR] before the app goes online again, so a network that comes and goes does
+ * not make the app switch back and forth.
+ *
+ * Call [start] once, at app start (`SafClientApp`); it runs in [appScope] for as long as the
+ * app runs. Later calls do nothing.
  *
  * @param io runs the SDK calls, which block.
  */
@@ -79,17 +89,31 @@ class PaymentModeCoordinator(
     private val appScope: CoroutineScope,
     private val io: CoroutineDispatcher,
 ) {
-    /** Guards the decision to switch against a sale that starts at the same moment. */
+    /** Guards the decision to switch, the failure count and the jobs below. */
     private val lock = Any()
 
     private val started = AtomicBoolean(false)
 
     private val salesInProgress = MutableStateFlow(0)
 
-    /** `true` for [RETRY_ONLINE_AFTER] after a failed switch to online. */
-    private val onlineBlocked = MutableStateFlow(false)
+    /** Charge screens open (amount entry, card, result): a retry to online waits for them to close. */
+    private val chargeScreens = MutableStateFlow(0)
 
-    private val _state = MutableStateFlow(ModeState(network = network.status.value))
+    /** What, besides the inputs, holds the app back from online. */
+    private val control = MutableStateFlow(Control())
+
+    /** Failed switches to online in a row; picks the next wait in [RETRY_ONLINE_DELAYS]. */
+    private var failures = 0
+
+    /** The one wait before the next online attempt. A new one replaces it. */
+    private var retryJob: Job? = null
+
+    /** Counts [STABLE_NETWORK_FOR] since the network came up. */
+    private var stableJob: Job? = null
+
+    private val _state = MutableStateFlow(
+        ModeState(network = network.status.value, wasOffline = network.status.value == NetworkStatus.OFFLINE),
+    )
 
     /** The payment mode, a switch in progress, and what the merchant needs to know about it. */
     val state: StateFlow<ModeState> = _state.asStateFlow()
@@ -110,7 +134,8 @@ class PaymentModeCoordinator(
     /** Starts applying the rule. Later calls do nothing. */
     fun start() {
         if (!started.compareAndSet(false, true)) return
-        val busy = combine(salesInProgress, send.isRunning, statuses.isActive) { _, _, _ -> Unit }
+        appScope.launch { watchNetwork() }
+        val busy = combine(salesInProgress, send.isRunning, statuses.isActive, chargeScreens) { _, _, _, _ -> Unit }
         appScope.launch {
             combine(
                 network.status,
@@ -118,7 +143,7 @@ class PaymentModeCoordinator(
                     .distinctUntilChanged(),
                 reconcile.lastSummary,
                 busy,
-                onlineBlocked,
+                control,
             ) { status, stored, summary, _, _ -> Inputs(status, stored, summary) }
                 // A switch suspends this collector; meanwhile only the latest inputs matter.
                 .conflate()
@@ -147,6 +172,15 @@ class PaymentModeCoordinator(
         salesInProgress.update { (it - 1).coerceAtLeast(0) }
     }
 
+    /** The merchant opened the charge screen: a retry to online waits until [leaveChargeScreen]. */
+    fun enterChargeScreen() {
+        chargeScreens.update { it + 1 }
+    }
+
+    fun leaveChargeScreen() {
+        chargeScreens.update { (it - 1).coerceAtLeast(0) }
+    }
+
     /** Connects the API in use again. Ignored (`false`) while a switch runs. Blocks: call off the main thread. */
     fun connect(): Boolean {
         val state = _state.value
@@ -163,21 +197,91 @@ class PaymentModeCoordinator(
     /** Prints on the terminal printer through the API in use. */
     fun printReceipt(receipt: String): Boolean = terminal(_state.value.mode).printReceipt(receipt)
 
+    /**
+     * Follows the network: a return after a drop restarts the online retries from the shortest
+     * wait and starts the stability count; a drop is remembered so the banner can say "back
+     * online". When the network is up and the terminal has never said what it stores, it is
+     * asked now, so the app does not wait for it forever.
+     */
+    private suspend fun watchNetwork() {
+        var previous: NetworkStatus? = null
+        network.status.collect { status ->
+            when (status) {
+                NetworkStatus.ONLINE -> {
+                    if (previous == NetworkStatus.OFFLINE) resetRetries()
+                    if (previous != NetworkStatus.ONLINE) startStabilityCount()
+                    if (reconcile.lastSummary.value == null) {
+                        appScope.launch { errors.reportingErrors("reconcile") { withContext(io) { reconcile() } } }
+                    }
+                }
+                NetworkStatus.OFFLINE -> {
+                    synchronized(lock) { stableJob?.cancel() }
+                    control.update { it.copy(networkStable = false) }
+                    _state.update { it.copy(wasOffline = true) }
+                }
+            }
+            previous = status
+        }
+    }
+
+    private fun resetRetries() = synchronized(lock) {
+        failures = 0
+        retryJob?.cancel()
+        retryJob = null
+        control.update { it.copy(onlineBlocked = false) }
+    }
+
+    private fun startStabilityCount() = synchronized(lock) {
+        stableJob?.cancel()
+        control.update { it.copy(networkStable = false) }
+        stableJob = appScope.launch {
+            delay(STABLE_NETWORK_FOR)
+            control.update { it.copy(networkStable = true) }
+        }
+    }
+
     private suspend fun evaluate(inputs: Inputs) {
         val target = synchronized(lock) {
             val state = _state.value
+            if (state.isSwitching) return
             val wanted = wantedMode(inputs)
-            if (state.isSwitching || wanted == state.mode || isBusy()) return
-            _state.value = state.copy(switchingTo = wanted)
+            val wait = if (wanted == PaymentMode.OFFLINE || isBusy()) onlineWait(inputs) else null
+            if (wanted == state.mode || isBusy()) {
+                _state.value = state.copy(onlineWait = wait)
+                return
+            }
+            _state.value = state.copy(switchingTo = wanted, onlineWait = null)
             wanted
         }
         switchTo(target)
     }
 
+    /** Called under [lock]. */
     private fun wantedMode(inputs: Inputs): PaymentMode {
         if (inputs.network == NetworkStatus.OFFLINE) return PaymentMode.OFFLINE
-        val nothingWaiting = inputs.storedInJournal == 0 && inputs.summary?.references?.isEmpty() == true
-        return if (nothingWaiting && !onlineBlocked.value) PaymentMode.ONLINE else PaymentMode.OFFLINE
+        if (!inputs.nothingWaiting()) return PaymentMode.OFFLINE
+        val control = control.value
+        val held = control.onlineBlocked ||
+            (control.afterNetworkLoss && !control.networkStable) ||
+            (failures > 0 && chargeScreens.value > 0)
+        return if (held) PaymentMode.OFFLINE else PaymentMode.ONLINE
+    }
+
+    /**
+     * Why the app stays on Store and Forward although the network is up and nothing waits:
+     * `null` when online is in use, the network is down, sales wait, or a failed switch holds
+     * it (the banner says so through [ModeState.onlineUnavailable]).
+     */
+    private fun onlineWait(inputs: Inputs): OnlineWait? {
+        val control = control.value
+        return when {
+            _state.value.mode == PaymentMode.ONLINE || inputs.network == NetworkStatus.OFFLINE -> null
+            inputs.summary == null && inputs.storedInJournal == 0 -> OnlineWait.AWAITING_TERMINAL
+            !inputs.nothingWaiting() || control.onlineBlocked -> null
+            control.afterNetworkLoss && !control.networkStable -> OnlineWait.NETWORK_SETTLING
+            statuses.isActive.value -> OnlineWait.BUSY_FOLLOW_UP
+            else -> OnlineWait.WAITING_IDLE
+        }
     }
 
     /** Read live, not from the inputs: they may be a moment old. */
@@ -185,22 +289,7 @@ class PaymentModeCoordinator(
         salesInProgress.value > 0 || send.isRunning.value || statuses.isActive.value
 
     private suspend fun switchTo(target: PaymentMode) {
-        val from = terminal(target.other())
-        val to = terminal(target)
-        val error = try {
-            val connected = withTimeoutOrNull(SWITCH_TIMEOUT) {
-                withContext(io) {
-                    from.deactivate()
-                    check(to.activate()) { "The SDK refused to start ${target.label()}" }
-                }
-                to.connection.first { it == TerminalConnection.CONNECTED }
-            }
-            if (connected == null) IllegalStateException("${target.label()} not connected after $SWITCH_TIMEOUT") else null
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            e
-        }
+        val error = connectTo(target)
         if (error == null) {
             _state.update {
                 it.copy(
@@ -208,6 +297,13 @@ class PaymentModeCoordinator(
                     switchingTo = null,
                     onlineUnavailable = if (target == PaymentMode.ONLINE) false else it.onlineUnavailable,
                 )
+            }
+            if (target == PaymentMode.ONLINE) {
+                synchronized(lock) { failures = 0 }
+                control.update { it.copy(afterNetworkLoss = false) }
+            } else if (network.status.value == NetworkStatus.OFFLINE) {
+                // The network dropped: wait for it to be stable before going online again.
+                control.update { it.copy(afterNetworkLoss = true) }
             }
             return
         }
@@ -221,23 +317,45 @@ class PaymentModeCoordinator(
         }
     }
 
-    private suspend fun fallBackToStoreAndForward() {
-        _state.update { it.copy(switchingTo = PaymentMode.OFFLINE) }
-        try {
-            withContext(io) {
-                online.deactivate()
-                saf.activate()
+    /**
+     * Deactivates the other API, activates the one for [target] and waits for it to be
+     * CONNECTED. Returns `null` on success, else what went wrong.
+     */
+    private suspend fun connectTo(target: PaymentMode): Exception? {
+        val from = terminal(target.other())
+        val to = terminal(target)
+        return try {
+            val connected = withTimeoutOrNull(SWITCH_TIMEOUT) {
+                withContext(io) {
+                    from.deactivate()
+                    check(to.activate()) { "The SDK refused to start ${target.label()}" }
+                }
+                to.connection.first { it == TerminalConnection.CONNECTED }
             }
+            if (connected == null) IllegalStateException("${target.label()} not connected after $SWITCH_TIMEOUT") else null
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            errors.report("switch to offline", e)
+            e
         }
+    }
+
+    private suspend fun fallBackToStoreAndForward() {
+        _state.update { it.copy(switchingTo = PaymentMode.OFFLINE) }
+        connectTo(PaymentMode.OFFLINE)?.let { errors.report("switch to offline", it) }
         _state.update { it.copy(mode = PaymentMode.OFFLINE, switchingTo = null, onlineUnavailable = true) }
-        onlineBlocked.value = true
-        appScope.launch {
-            delay(RETRY_ONLINE_AFTER)
-            onlineBlocked.value = false
+        holdOnlineAfterFailure()
+    }
+
+    /** Blocks online for the next wait in [RETRY_ONLINE_DELAYS]; replaces any earlier wait. */
+    private fun holdOnlineAfterFailure() = synchronized(lock) {
+        val wait = RETRY_ONLINE_DELAYS[failures.coerceAtMost(RETRY_ONLINE_DELAYS.lastIndex)]
+        failures++
+        retryJob?.cancel()
+        control.update { it.copy(onlineBlocked = true) }
+        retryJob = appScope.launch {
+            delay(wait)
+            control.update { it.copy(onlineBlocked = false) }
         }
     }
 
@@ -256,6 +374,15 @@ class PaymentModeCoordinator(
         PaymentMode.OFFLINE -> "Store and Forward"
     }
 
+    private data class Control(
+        /** A failed switch to online: wait before trying again. */
+        val onlineBlocked: Boolean = false,
+        /** The network has been up for [STABLE_NETWORK_FOR]. */
+        val networkStable: Boolean = false,
+        /** The last switch to Store and Forward came from a network drop. */
+        val afterNetworkLoss: Boolean = false,
+    )
+
     private data class Inputs(
         val network: NetworkStatus,
         val storedInJournal: Int,
@@ -263,14 +390,20 @@ class PaymentModeCoordinator(
         val summary: StoredSummary?,
     ) {
         fun waitingToSend(): Int = maxOf(storedInJournal, summary?.references?.size ?: 0)
+
+        /** Nothing stored, as far as both the journal and the terminal's own answer say. */
+        fun nothingWaiting(): Boolean = storedInJournal == 0 && summary?.references?.isEmpty() == true
     }
 
     companion object {
         /** Longest wait for the other API to be CONNECTED. */
         val SWITCH_TIMEOUT: Duration = 30.seconds
 
-        /** Wait after a failed switch to online before trying again. */
-        val RETRY_ONLINE_AFTER: Duration = 2.minutes
+        /** Waits before the next try after 1, 2, 3, then 4 or more failed switches to online in a row. */
+        val RETRY_ONLINE_DELAYS: List<Duration> = listOf(2.minutes, 5.minutes, 15.minutes, 30.minutes)
+
+        /** After a network drop, how long the network must stay up before the app goes online again. */
+        val STABLE_NETWORK_FOR: Duration = 60.seconds
 
         /** Message of the sale refused because a switch is running. */
         const val SWITCHING = "Switching between online and offline sales"

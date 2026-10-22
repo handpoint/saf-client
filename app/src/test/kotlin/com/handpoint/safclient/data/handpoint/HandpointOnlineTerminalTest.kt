@@ -7,6 +7,7 @@ import com.handpoint.api.shared.FinancialStatus
 import com.handpoint.api.shared.OperationStartResult
 import com.handpoint.api.shared.TransactionResult
 import com.handpoint.safclient.domain.OnlineTerminal
+import com.handpoint.safclient.domain.model.DeclineReason
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.SaleChannel
@@ -16,6 +17,10 @@ import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.testutil.FakeHapi
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.DEVICE
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.SALE_REFERENCE
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
+import java.util.Currency
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
@@ -24,10 +29,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
-import java.util.Currency
 
 @OptIn(ExperimentalCoroutinesApi::class) // runCurrent, currentTime
 class HandpointOnlineTerminalTest {
@@ -152,7 +153,7 @@ class HandpointOnlineTerminalTest {
             fire<Events.EndOfTransaction> { it.endOfTransaction(result(FinancialStatus.DECLINED), DEVICE) }
         }
 
-        assertEquals(SaleOutcome.DeclinedOnline("Declined"), terminal.sale(amount))
+        assertEquals(SaleOutcome.DeclinedOnline(""), terminal.sale(amount))
     }
 
     @Test
@@ -182,7 +183,7 @@ class HandpointOnlineTerminalTest {
             fire<Events.EndOfTransaction> { it.endOfTransaction(result(FinancialStatus.PARTIAL_APPROVAL), DEVICE) }
         }
 
-        assertEquals(SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN), terminal.sale(amount))
+        assertEquals(SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN, SaleReference(SALE_REFERENCE)), terminal.sale(amount))
     }
 
     @Test
@@ -191,7 +192,8 @@ class HandpointOnlineTerminalTest {
 
         val outcome = terminal.sale(amount)
 
-        assertEquals(SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN), outcome)
+        // The reference lets the app keep a trace of the sale to check with Handpoint.
+        assertEquals(SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN, SaleReference(SALE_REFERENCE)), outcome)
         assertEquals(180_000L, testScheduler.currentTime)
         assertEquals(1, fake.calls.count { it == "stopCurrentTransaction" })
     }
@@ -249,4 +251,17 @@ class HandpointOnlineTerminalTest {
             errorMessage = error
             customerReceipt = "customer copy"
         }
+
+    @Test
+    fun `a decline without a readable message keeps the reason its key gives`() = runTest {
+        val terminal = activeTerminal()
+        fake.duringSale = {
+            fire<Events.EndOfTransaction> {
+                // The SDK keeps the untranslated key in the status message; no readable message here.
+                it.endOfTransaction(result(FinancialStatus.DECLINED).apply { statusMessage = "EXPIRED_CARD" }, DEVICE)
+            }
+        }
+
+        assertEquals(SaleOutcome.DeclinedOnline("", DeclineReason.CARD_EXPIRED), terminal.sale(amount))
+    }
 }

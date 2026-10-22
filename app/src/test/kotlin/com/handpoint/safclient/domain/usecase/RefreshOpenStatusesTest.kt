@@ -7,11 +7,14 @@ import com.handpoint.safclient.domain.model.ProcessingStatus.NOT_FOUND
 import com.handpoint.safclient.domain.model.ProcessingStatus.STORED
 import com.handpoint.safclient.domain.model.ProcessingStatus.SUCCEEDED
 import com.handpoint.safclient.domain.model.Sale
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.testutil.MutableClock
+import java.time.Duration
+import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -25,8 +28,6 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import java.time.Duration
-import java.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RefreshOpenStatusesTest {
@@ -179,5 +180,22 @@ class RefreshOpenStatusesTest {
         gate.complete(Unit)
         pass.join()
         assertEquals(false, statuses.isActive.value)
+    }
+
+    @Test
+    fun `online sales are never asked about, not even unconfirmed ones`() = runTest {
+        terminal.statusAnswer = IN_PROGRESS
+        val journal = InMemoryJournal(
+            sent("unconfirmed", ProcessingStatus.UNKNOWN, Duration.ZERO).copy(channel = SaleChannel.ONLINE),
+            sent("odd", IN_PROGRESS, Duration.ZERO).copy(channel = SaleChannel.ONLINE),
+            sent("offline", IN_PROGRESS, Duration.ZERO),
+        )
+        val statuses = statuses(journal)
+
+        statuses()
+        statuses.followUp(listOf(SaleReference("unconfirmed"), SaleReference("odd")))
+        advanceUntilIdle()
+
+        assertEquals(listOf("offline"), requested())
     }
 }

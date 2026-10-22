@@ -4,6 +4,14 @@ import java.time.Instant
 
 enum class EntryMode { CHIP, CONTACTLESS, SWIPE, MANUAL, UNKNOWN }
 
+/**
+ * How a sale was taken.
+ *
+ * - [OFFLINE]: through Store and Forward. The terminal stored it; it is charged after it is sent.
+ * - [ONLINE]: through the online API. Handpoint approved it at once; nothing is left to send.
+ */
+enum class SaleChannel { ONLINE, OFFLINE }
+
 data class Sale(
     val reference: SaleReference,
     val amount: Money,
@@ -15,4 +23,5 @@ data class Sale(
     val statusCheckedAt: Instant?,
     val merchantReceipt: String?,
     val customerReceipt: String?,
+    val channel: SaleChannel = SaleChannel.OFFLINE,
 )

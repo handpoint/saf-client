@@ -59,7 +59,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SafDatabase =
-        Room.databaseBuilder(context, SafDatabase::class.java, "saf-client.db").build()
+        Room.databaseBuilder(context, SafDatabase::class.java, "saf-client.db")
+            .addMigrations(SafDatabase.MIGRATION_1_2)
+            .build()
 
     @Provides
     fun provideSaleDao(database: SafDatabase): SaleDao = database.saleDao()

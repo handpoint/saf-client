@@ -5,6 +5,7 @@ import com.handpoint.safclient.domain.model.EntryMode
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -56,6 +57,7 @@ private fun SaleEntity.toDomain() = Sale(
     statusCheckedAt = statusCheckedAtEpochMs?.let(Instant::ofEpochMilli),
     merchantReceipt = merchantReceipt,
     customerReceipt = customerReceipt,
+    channel = SaleChannel.valueOf(channel),
 )
 
 private fun Sale.toEntity() = SaleEntity(
@@ -70,4 +72,5 @@ private fun Sale.toEntity() = SaleEntity(
     statusCheckedAtEpochMs = statusCheckedAt?.toEpochMilli(),
     merchantReceipt = merchantReceipt,
     customerReceipt = customerReceipt,
+    channel = channel.name,
 )

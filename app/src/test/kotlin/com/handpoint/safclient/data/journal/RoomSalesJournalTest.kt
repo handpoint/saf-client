@@ -7,6 +7,7 @@ import com.handpoint.safclient.domain.model.EntryMode
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -49,6 +50,15 @@ class RoomSalesJournalTest {
         merchantReceipt = "merchant",
         customerReceipt = null,
     )
+
+    @Test
+    fun keepsTheChannelOfEachSale() = runBlocking {
+        journal.record(sale("offline", 1_000))
+        journal.record(sale("online", 2_000, ProcessingStatus.SUCCEEDED).copy(channel = SaleChannel.ONLINE))
+
+        assertEquals(SaleChannel.OFFLINE, journal.find(SaleReference("offline"))?.channel)
+        assertEquals(SaleChannel.ONLINE, journal.find(SaleReference("online"))?.channel)
+    }
 
     @Test
     fun observeAllReturnsNewestFirst() = runBlocking {

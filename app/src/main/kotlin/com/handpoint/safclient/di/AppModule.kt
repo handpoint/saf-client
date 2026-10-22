@@ -14,11 +14,13 @@ import com.handpoint.safclient.data.handpoint.HandpointSafTerminal
 import com.handpoint.safclient.data.journal.RoomSalesJournal
 import com.handpoint.safclient.data.journal.SafDatabase
 import com.handpoint.safclient.data.journal.SaleDao
+import com.handpoint.safclient.data.network.AndroidNetworkMonitor
 import com.handpoint.safclient.data.settings.AppSettings
 import com.handpoint.safclient.data.logging.LogcatErrorReporter
 import com.handpoint.safclient.domain.AppPreferences
 import com.handpoint.safclient.domain.ErrorReporter
 import com.handpoint.safclient.domain.ApplicationScope
+import com.handpoint.safclient.domain.NetworkMonitor
 import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import dagger.Module
@@ -55,6 +57,13 @@ object AppModule {
         },
         clock = clock,
     )
+
+    @Provides
+    @Singleton
+    fun provideNetworkMonitor(
+        @ApplicationContext context: Context,
+        @ApplicationScope scope: CoroutineScope,
+    ): NetworkMonitor = AndroidNetworkMonitor(context, scope)
 
     @Provides
     @Singleton

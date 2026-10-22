@@ -1,10 +1,12 @@
 package com.handpoint.safclient.domain.usecase
 
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.ProcessingStatus.IN_PROGRESS
 import com.handpoint.safclient.domain.model.ProcessingStatus.NOT_FOUND
 import com.handpoint.safclient.domain.model.ProcessingStatus.STORED
 import com.handpoint.safclient.domain.model.ProcessingStatus.SUCCEEDED
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.model.TerminalConnection
@@ -14,6 +16,9 @@ import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.testutil.MutableClock
+import java.time.Duration
+import java.time.Instant
+import java.util.Currency
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -22,9 +27,6 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
-import java.time.Duration
-import java.time.Instant
-import java.util.Currency
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReconcileStoredSalesTest {
@@ -145,5 +147,20 @@ class ReconcileStoredSalesTest {
         job.join()
 
         assertEquals(IN_PROGRESS, journal.status("A"))
+    }
+
+    @Test
+    fun `reconcile leaves an unconfirmed online sale alone, listed by the terminal or not`() = runTest {
+        val unconfirmed = sale("U", ProcessingStatus.UNKNOWN).copy(channel = SaleChannel.ONLINE)
+        val other = sale("V", ProcessingStatus.UNKNOWN).copy(channel = SaleChannel.ONLINE)
+        journal.record(unconfirmed)
+        journal.record(other)
+        terminal.storedSummary = StoredSummary(listOf(SaleReference("U")), null)
+        clock.advance(java.time.Duration.ofMinutes(1))
+
+        reconcile()
+
+        assertEquals(unconfirmed, journal.find(SaleReference("U")))
+        assertEquals(other, journal.find(SaleReference("V")))
     }
 }

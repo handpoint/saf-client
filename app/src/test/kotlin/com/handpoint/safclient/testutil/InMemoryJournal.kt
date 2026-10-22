@@ -41,7 +41,8 @@ class InMemoryJournal(vararg initial: Sale) : SalesJournal {
 
     override suspend fun markStored(reference: SaleReference) = sales.update { all ->
         val sale = all[reference]
-        if (sale == null || sale.status.isFinal || sale.status == ProcessingStatus.STORED) all
+        // Like the Room journal: only IN_PROGRESS and NOT_FOUND go back to STORED.
+        if (sale == null || sale.status !in setOf(ProcessingStatus.IN_PROGRESS, ProcessingStatus.NOT_FOUND)) all
         else all + (reference to sale.copy(status = ProcessingStatus.STORED, sentAt = null))
     }
 

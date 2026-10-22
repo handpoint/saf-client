@@ -26,6 +26,7 @@ import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.testutil.MutableClock
 import com.handpoint.safclient.testutil.RecordingErrorReporter
+import java.time.Instant
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -38,7 +39,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PaymentModeCoordinatorTest {
@@ -470,4 +470,33 @@ class PaymentModeCoordinatorTest {
 
     private lateinit var current: PaymentModeCoordinator
     private fun mode() = current
+
+    @Test
+    fun `a short drop that ends during the switch to offline still waits 60 s before going online`() = runTest {
+        network.status.value = NetworkStatus.ONLINE
+        val mode = started()
+        assertEquals(ONLINE, mode.state.value.mode)
+        saf.connectsOnActivate = false // Store and Forward takes a while to connect
+
+        network.status.value = NetworkStatus.OFFLINE
+        runCurrent()
+        assertEquals(OFFLINE, mode.state.value.switchingTo)
+        advanceTimeBy(3_000)
+        network.status.value = NetworkStatus.ONLINE // back while the switch still runs
+        runCurrent()
+        advanceTimeBy(2_000)
+        saf.connectionState.value = TerminalConnection.CONNECTED // the switch ends, network up
+        runCurrent()
+        assertEquals(OFFLINE, mode.state.value.mode)
+        assertEquals(OnlineWait.NETWORK_SETTLING, mode.state.value.onlineWait)
+
+        advanceTimeBy(57_999) // 59.999 s since the network came back
+        runCurrent()
+        assertEquals(1, online.activateCalls) // no switch back yet
+
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(ONLINE, mode.state.value.mode)
+        assertEquals(2, online.activateCalls)
+    }
 }

@@ -2,13 +2,14 @@ package com.handpoint.safclient.data.journal
 
 import android.content.Context
 import androidx.room.Room
-import org.robolectric.RuntimeEnvironment
 import com.handpoint.safclient.domain.model.EntryMode
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
+import java.time.Instant
+import java.util.Currency
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -18,8 +19,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import java.time.Instant
-import java.util.Currency
+import org.robolectric.RuntimeEnvironment
 
 @RunWith(RobolectricTestRunner::class)
 class RoomSalesJournalTest {
@@ -152,5 +152,15 @@ class RoomSalesJournalTest {
 
         assertNull(journal.find(SaleReference("a")))
         assertEquals(emptyList<Sale>(), journal.observeAll().first())
+    }
+
+    @Test
+    fun markStoredLeavesAnUnconfirmedOnlineSaleAlone() = runBlocking {
+        val unconfirmed = sale("U", 1_000, ProcessingStatus.UNKNOWN).copy(channel = SaleChannel.ONLINE)
+        journal.record(unconfirmed)
+
+        journal.markStored(SaleReference("U"))
+
+        assertEquals(unconfirmed, journal.find(SaleReference("U")))
     }
 }

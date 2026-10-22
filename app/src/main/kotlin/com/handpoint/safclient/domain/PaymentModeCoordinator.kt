@@ -216,7 +216,11 @@ class PaymentModeCoordinator(
                 }
                 NetworkStatus.OFFLINE -> {
                     synchronized(lock) { stableJob?.cancel() }
-                    control.update { it.copy(networkStable = false) }
+                    // A drop while online (or on the way there) is what the 60 s rule guards
+                    // against. Mark it now, not when the switch to offline ends: a short drop can
+                    // be over by then.
+                    val online = _state.value.let { it.mode == PaymentMode.ONLINE || it.switchingTo == PaymentMode.ONLINE }
+                    control.update { it.copy(networkStable = false, afterNetworkLoss = it.afterNetworkLoss || online) }
                     _state.update { it.copy(wasOffline = true) }
                 }
             }
@@ -247,10 +251,11 @@ class PaymentModeCoordinator(
             val wanted = wantedMode(inputs)
             val wait = if (wanted == PaymentMode.OFFLINE || isBusy()) onlineWait(inputs) else null
             if (wanted == state.mode || isBusy()) {
-                _state.value = state.copy(onlineWait = wait)
+                _state.update { it.copy(onlineWait = wait) }
                 return
             }
-            _state.value = state.copy(switchingTo = wanted, onlineWait = null)
+            // update, not set: the network watcher may change other fields at the same time.
+            _state.update { it.copy(switchingTo = wanted, onlineWait = null) }
             wanted
         }
         switchTo(target)
@@ -300,7 +305,8 @@ class PaymentModeCoordinator(
             }
             if (target == PaymentMode.ONLINE) {
                 synchronized(lock) { failures = 0 }
-                control.update { it.copy(afterNetworkLoss = false) }
+                // A drop during this switch keeps the 60 s rule for the way back.
+                if (network.status.value == NetworkStatus.ONLINE) control.update { it.copy(afterNetworkLoss = false) }
             } else if (network.status.value == NetworkStatus.OFFLINE) {
                 // The network dropped: wait for it to be stable before going online again.
                 control.update { it.copy(afterNetworkLoss = true) }

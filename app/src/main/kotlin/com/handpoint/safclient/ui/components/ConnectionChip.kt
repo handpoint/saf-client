@@ -1,5 +1,6 @@
 package com.handpoint.safclient.ui.components
 
+import android.provider.Settings
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -17,9 +18,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -37,7 +40,7 @@ fun TerminalConnection.label(): String = when (this) {
     TerminalConnection.NOT_CONFIGURED -> "Not set up"
 }
 
-/** Small chip that shows whether the card reader is ready. The dot pulses while connecting. */
+/** Small chip that shows whether the card reader is ready. The dot pulses while connecting, unless system animations are off. */
 @Composable
 fun ConnectionChip(connection: TerminalConnection, modifier: Modifier = Modifier) {
     val colors = SafTheme.colors
@@ -47,7 +50,7 @@ fun ConnectionChip(connection: TerminalConnection, modifier: Modifier = Modifier
         TerminalConnection.DISCONNECTED -> colors.failed
         TerminalConnection.NOT_CONFIGURED -> colors.neutral
     }
-    val dotAlpha = if (connection == TerminalConnection.CONNECTING) {
+    val dotAlpha = if (connection == TerminalConnection.CONNECTING && animationsEnabled()) {
         rememberInfiniteTransition(label = "connecting").animateFloat(
             initialValue = 1f,
             targetValue = 0.25f,
@@ -74,6 +77,15 @@ fun ConnectionChip(connection: TerminalConnection, modifier: Modifier = Modifier
         )
         Spacer(Modifier.width(8.dp))
         Text(connection.label(), color = tone.content, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+/** False when the user turned animations off (animator duration scale 0) in system settings. */
+@Composable
+private fun animationsEnabled(): Boolean {
+    val resolver = LocalContext.current.contentResolver
+    return remember(resolver) {
+        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
     }
 }
 

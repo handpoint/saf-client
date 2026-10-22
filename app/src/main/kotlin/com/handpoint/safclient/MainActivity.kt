@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             SafTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Box(contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Store and Forward", style = MaterialTheme.typography.titleLarge)
                     }
                 }

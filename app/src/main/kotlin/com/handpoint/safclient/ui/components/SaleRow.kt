@@ -35,12 +35,13 @@ import com.handpoint.safclient.ui.theme.tabular
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Currency
 
-private val TimeFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private val TimeFormat: DateTimeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 
 /**
- * One sale in a list: amount, masked card ("Card" when unknown) and local time on the left,
+ * One sale in a list: amount, masked card ("Card" when unknown) and local time (short, locale format) on the left,
  * status on the right. Read out as a single sentence by screen readers.
  */
 @Composable

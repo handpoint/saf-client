@@ -67,6 +67,6 @@ class ReconcileStoredSalesTest {
 
         assertNull(total)
         assertEquals(Currency.getInstance("EUR"), settings.safCurrency.value)
-        assertEquals(IN_PROGRESS, journal.status("A"))
+        assertEquals(listOf(IN_PROGRESS, IN_PROGRESS, IN_PROGRESS), listOf("A", "B", "C").map { journal.status(it) })
     }
 }

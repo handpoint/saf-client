@@ -16,6 +16,7 @@ import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -33,12 +35,16 @@ import org.junit.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SendStoredSalesTest {
     private val clock = Clock.fixed(Instant.parse("2026-10-22T12:00:00Z"), ZoneOffset.UTC)
     private val terminal = FakeTerminal()
     private val journal = InMemoryJournal(sale("A"), sale("B"), sale("C"))
+
+    /** Errors the run reported to the app scope's exception handler. */
+    private val reportedErrors = mutableListOf<Throwable>()
 
     /**
      * The app scope runs on the test scheduler but is not a child of the test, like the real
@@ -49,7 +55,10 @@ class SendStoredSalesTest {
         journal = journal,
         reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
         clock = clock,
-        appScope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()),
+        appScope = CoroutineScope(
+            StandardTestDispatcher(testScheduler) + SupervisorJob() +
+                CoroutineExceptionHandler { _, error -> reportedErrors += error },
+        ),
     )
 
     private fun ref(value: String) = SaleReference(value)
@@ -172,5 +181,121 @@ class SendStoredSalesTest {
         advanceUntilIdle()
 
         assertEquals(2, terminal.forwardCalls)
+    }
+
+    @Test
+    fun `forward that throws ends the run with none sent`() = runTest {
+        val sdkError = IllegalStateException("SDK cannot be created")
+        terminal.forwardError = sdkError
+        val send = sendStoredSales()
+
+        val events = send().toList()
+        advanceUntilIdle()
+
+        assertEquals(listOf(Finished(ForwardingResult.NoneSent(ForwardingError.FAILED, 0, 0, 0))), events)
+        assertFalse(send.isRunning.value)
+        assertEquals(listOf(sdkError.message), reportedErrors.map { it.message })
+        assertEquals(listOf(STORED, STORED, STORED), listOf("A", "B", "C").map { journal.status(it) })
+    }
+
+    @Test
+    fun `failing reconcile after a run still ends with all sent`() = runTest {
+        val allSent = Finished(ForwardingResult.AllSent(1))
+        terminal.forwardScript = listOf(Started(1), Sent(ref("A"), 1, 1), allSent)
+        terminal.storedError = IllegalStateException("terminal gone")
+        val send = sendStoredSales()
+
+        val events = send().toList()
+        advanceUntilIdle()
+
+        assertEquals(allSent, events.last())
+        assertEquals(IN_PROGRESS, journal.status("A"))
+        assertFalse(send.isRunning.value)
+        assertEquals(1, reportedErrors.size)
+    }
+
+    @Test
+    fun `journal error mid-run ends with a failed partial result`() = runTest {
+        val failingJournal = object : com.handpoint.safclient.domain.SalesJournal by journal {
+            override suspend fun markSent(reference: SaleReference, at: Instant) {
+                if (reference == ref("B")) throw IllegalStateException("disk full")
+                journal.markSent(reference, at)
+            }
+        }
+        terminal.forwardScript = listOf(Started(3), Sent(ref("A"), 1, 3), Sent(ref("B"), 2, 3))
+        terminal.storedSummary = StoredSummary(listOf(ref("C")), Money(1000, USD))
+        val send = SendStoredSales(
+            terminal = terminal,
+            journal = failingJournal,
+            reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
+            clock = clock,
+            appScope = CoroutineScope(
+                StandardTestDispatcher(testScheduler) + SupervisorJob() +
+                    CoroutineExceptionHandler { _, error -> reportedErrors += error },
+            ),
+        )
+
+        val events = send().toList()
+        advanceUntilIdle()
+
+        assertEquals(Finished(ForwardingResult.Partial(1, 0, 2, 3, ForwardingError.FAILED)), events.last())
+        assertFalse(send.isRunning.value)
+        assertEquals(1, reportedErrors.size)
+        assertEquals(IN_PROGRESS, journal.status("B")) // reconcile still ran: B is no longer on the terminal
+    }
+
+    @Test
+    fun `silence after started ends as a network stop with none sent`() = runTest {
+        terminal.forwardScript = listOf(Started(3))
+        terminal.storedSummary = StoredSummary(listOf(ref("A"), ref("B"), ref("C")), Money(3000, USD))
+        val send = sendStoredSales()
+        val events = mutableListOf<ForwardingEvent>()
+        launch { send().toList(events) }
+
+        advanceTimeBy(SendStoredSales.INACTIVITY_TIMEOUT - 1.seconds)
+        assertTrue(send.isRunning.value)
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(Started(3), Finished(ForwardingResult.NoneSent(ForwardingError.NETWORK, 0, 3, 3))),
+            events,
+        )
+        assertFalse(send.isRunning.value)
+        assertEquals(1, terminal.storedCalls)
+    }
+
+    @Test
+    fun `silence after one sale ends as a partial network stop`() = runTest {
+        terminal.forwardScript = listOf(Started(3), Sent(ref("A"), 1, 3))
+        terminal.storedSummary = StoredSummary(listOf(ref("B"), ref("C")), Money(2000, USD))
+        val send = sendStoredSales()
+
+        val events = send().toList()
+        advanceUntilIdle()
+
+        assertEquals(Finished(ForwardingResult.Partial(1, 0, 2, 3, ForwardingError.NETWORK)), events.last())
+        assertEquals(IN_PROGRESS, journal.status("A"))
+        assertEquals(STORED, journal.status("B"))
+        assertFalse(send.isRunning.value)
+    }
+
+    @Test
+    fun `each event resets the inactivity timeout`() = runTest {
+        terminal.storedSummary = StoredSummary(emptyList(), null)
+        val send = sendStoredSales()
+        val events = mutableListOf<ForwardingEvent>()
+        launch { send().toList(events) }
+        runCurrent()
+
+        terminal.emitForwarding(Started(2))
+        advanceTimeBy(50.seconds)
+        terminal.emitForwarding(Sent(ref("A"), 1, 2))
+        advanceTimeBy(50.seconds)
+        terminal.emitForwarding(Sent(ref("B"), 2, 2))
+        val done = Finished(ForwardingResult.AllSent(2))
+        terminal.emitForwarding(done)
+        advanceUntilIdle()
+
+        assertEquals(done, events.last())
     }
 }

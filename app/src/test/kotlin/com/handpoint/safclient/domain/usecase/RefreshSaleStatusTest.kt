@@ -75,4 +75,15 @@ class RefreshSaleStatusTest {
         assertEquals(IN_PROGRESS, journal.status("A"))
         assertNull(journal.find(SaleReference("A"))?.statusCheckedAt)
     }
+
+    @Test
+    fun `sale missing from the journal returns the status and writes nothing`() = runTest {
+        val journal = InMemoryJournal()
+        terminal.statusAnswer = SUCCEEDED
+
+        val status = refresh(journal)(SaleReference("X"))
+
+        assertEquals(SUCCEEDED, status)
+        assertNull(journal.find(SaleReference("X")))
+    }
 }

@@ -15,7 +15,6 @@ import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Clock
@@ -72,6 +71,6 @@ class TakeSaleTest {
         takeSale(Money(1000, USD))
 
         assertEquals(0, terminal.storedCalls)
-        assertNull(journal.find(SaleReference("A")))
+        assertTrue(journal.observeAll().first().isEmpty())
     }
 }

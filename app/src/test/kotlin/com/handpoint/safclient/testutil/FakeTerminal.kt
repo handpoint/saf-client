@@ -30,6 +30,12 @@ class FakeTerminal : StoreAndForwardTerminal {
     var deleteResult: DeleteResult = DeleteResult.DELETED
     var forwardAccepted: Boolean = true
 
+    /** Thrown by [forward] when set, as when the SDK cannot be created. */
+    var forwardError: Exception? = null
+
+    /** Thrown by [storedOnTerminal] when set. */
+    var storedError: Exception? = null
+
     /** Emitted on [forwarding] as soon as [forward] accepts a run. Leave empty to drive events by hand. */
     var forwardScript: List<ForwardingEvent> = emptyList()
 
@@ -62,11 +68,13 @@ class FakeTerminal : StoreAndForwardTerminal {
 
     override suspend fun storedOnTerminal(): StoredSummary? {
         storedCalls++
+        storedError?.let { throw it }
         return storedSummary
     }
 
     override fun forward(): Boolean {
         forwardCalls++
+        forwardError?.let { throw it }
         if (forwardAccepted) forwardScript.forEach { check(forwardingEvents.tryEmit(it)) }
         return forwardAccepted
     }

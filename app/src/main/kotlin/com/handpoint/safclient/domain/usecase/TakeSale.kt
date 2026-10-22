@@ -10,8 +10,9 @@ import javax.inject.Inject
  * Takes one sale on the terminal and records an offline approval in the journal.
  *
  * When the outcome is unknown (no result in time), the terminal may still have stored the
- * sale. This use case then reconciles the journal with the terminal, so Home shows the
- * terminal's real pending total before the merchant tries again.
+ * sale. This use case then reconciles the journal with the terminal (see [ReconcileStoredSales]):
+ * journal sales the terminal no longer holds are marked sent, and the terminal's currency is
+ * adopted. A sale the terminal stored but never reported is not added to the journal.
  *
  * The first call may create the SDK: call it off the main thread.
  */

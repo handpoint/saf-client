@@ -137,6 +137,10 @@ No terminal and no network are needed. The tests use a fake SDK (`app/src/test/k
 - the Room journal and the settings;
 - the view models and the Compose screens (Robolectric).
 
+## Known pitfalls
+
+- **Native libraries must be extracted.** The PAX SDK loads its `.so` files from the app's extracted `lib/` directory. With `minSdk` 24 or higher, AGP does not extract them by default, and the app crashes at start with `UnsatisfiedLinkError` (`libDeviceConfig.so`). Set `packaging.jniLibs.useLegacyPackaging = true` and keep `ndk.abiFilters` to `armeabi-v7a` and `armeabi`: the SDK ships a complete set of native libraries for 32-bit ARM only (`app/build.gradle.kts`).
+
 ## Known limitations
 
 - Sale only. There is no refund or void.

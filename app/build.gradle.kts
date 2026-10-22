@@ -26,6 +26,12 @@ android {
         buildConfigField("String", "SHARED_SECRET", "\"${localProps.getProperty("handpoint.sharedSecret", "")}\"")
         buildConfigField("String", "SAF_CURRENCY", "\"${localProps.getProperty("handpoint.safCurrency", "USD")}\"")
         buildConfigField("String", "SDK_VERSION", "\"${libs.versions.handpointSdk.get()}\"")
+
+        // The PAX SDK ships complete native libraries for 32-bit ARM only (arm64-v8a is partial),
+        // so a 64-bit terminal must run the app as 32-bit or it misses libraries at runtime.
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "armeabi")
+        }
     }
 
     buildFeatures {
@@ -40,6 +46,10 @@ android {
     }
 
     packaging {
+        // The PAX SDK loads its native libraries through a class loader that only searches the
+        // app's extracted lib directory. With minSdk 24 AGP stores them uncompressed inside the
+        // APK and does not extract them, which fails with UnsatisfiedLinkError on the terminal.
+        jniLibs.useLegacyPackaging = true
         jniLibs.pickFirsts += "**/**/*.so"
         // The SDK's shared modules ship duplicate manifests and layouts; keep the app's own.
         resources.excludes += listOf("META-INF/*", "AndroidManifest.xml", "resources.arsc", "**/anim/*.xml", "**/animator/*.xml", "**/layout/*.xml")

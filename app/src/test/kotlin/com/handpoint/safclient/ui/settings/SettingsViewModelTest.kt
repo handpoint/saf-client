@@ -3,7 +3,9 @@ package com.handpoint.safclient.ui.settings
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.testutil.FakePreferences
 import com.handpoint.safclient.testutil.FakeTerminal
+import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.RecordingErrorReporter
+import com.handpoint.safclient.testutil.paymentMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -18,6 +20,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.time.Clock
 import java.util.Currency
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -35,7 +38,8 @@ class SettingsViewModelTest {
     fun tearDown() = Dispatchers.resetMain()
 
     private fun TestScope.settingsViewModel(): SettingsViewModel {
-        val viewModel = SettingsViewModel(settings, terminal, dispatcher, errors)
+        val payments = paymentMode(terminal, InMemoryJournal(), Clock.systemUTC(), io = dispatcher)
+        val viewModel = SettingsViewModel(settings, payments, dispatcher, errors)
         backgroundScope.launch(dispatcher) { viewModel.uiState.collect {} }
         return viewModel
     }

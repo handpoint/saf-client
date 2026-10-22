@@ -23,8 +23,12 @@ import com.handpoint.safclient.domain.ErrorReporter
 import com.handpoint.safclient.domain.ApplicationScope
 import com.handpoint.safclient.domain.NetworkMonitor
 import com.handpoint.safclient.domain.OnlineTerminal
+import com.handpoint.safclient.domain.PaymentModeCoordinator
 import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
+import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
+import com.handpoint.safclient.domain.usecase.RefreshOpenStatuses
+import com.handpoint.safclient.domain.usecase.SendStoredSales
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -76,6 +80,23 @@ object AppModule {
         },
         clock = clock,
     )
+
+    /** Chooses online or Store and Forward and switches between them (see its KDoc). */
+    @Provides
+    @Singleton
+    @Suppress("LongParameterList") // one dependency per input of the mode rule
+    fun providePaymentModeCoordinator(
+        saf: StoreAndForwardTerminal,
+        online: OnlineTerminal,
+        network: NetworkMonitor,
+        journal: SalesJournal,
+        reconcile: ReconcileStoredSales,
+        send: SendStoredSales,
+        statuses: RefreshOpenStatuses,
+        errors: ErrorReporter,
+        @ApplicationScope scope: CoroutineScope,
+        @IoDispatcher io: CoroutineDispatcher,
+    ): PaymentModeCoordinator = PaymentModeCoordinator(saf, online, network, journal, reconcile, send, statuses, errors, scope, io)
 
     @Provides
     @Singleton

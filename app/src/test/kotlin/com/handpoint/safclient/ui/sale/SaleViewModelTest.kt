@@ -1,20 +1,31 @@
 package com.handpoint.safclient.ui.sale
 
+import com.handpoint.safclient.domain.OnlineTerminal
+import com.handpoint.safclient.domain.PaymentModeCoordinator
 import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.DeclineReason
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.NetworkStatus
+import com.handpoint.safclient.domain.model.PaymentMode
+import com.handpoint.safclient.domain.model.ProcessingStatus.SUCCEEDED
 import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
 import com.handpoint.safclient.domain.usecase.TakeSale
+import com.handpoint.safclient.testutil.FakeNetworkMonitor
+import com.handpoint.safclient.testutil.FakeOnlineTerminal
 import com.handpoint.safclient.testutil.FakePreferences
 import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.testutil.RecordingErrorReporter
+import com.handpoint.safclient.testutil.paymentMode
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -31,9 +42,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SaleViewModelTest {
@@ -51,9 +59,20 @@ class SaleViewModelTest {
     @After
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun saleViewModel(): SaleViewModel {
-        val takeSale = TakeSale(terminal, journal, ReconcileStoredSales(terminal, journal, settings, clock))
-        return SaleViewModel(takeSale, terminal, settings, dispatcher, errors)
+    private val online = FakeOnlineTerminal()
+    private val network = FakeNetworkMonitor()
+    private lateinit var mode: PaymentModeCoordinator
+    private lateinit var reconcile: ReconcileStoredSales
+
+    /** The view model over [saf] and [journal], with a mode coordinator that stays offline unless started. */
+    private fun TestScope.saleViewModel(
+        saf: StoreAndForwardTerminal = terminal,
+        journal: SalesJournal = this@SaleViewModelTest.journal,
+    ): SaleViewModel {
+        reconcile = ReconcileStoredSales(saf, journal, settings, clock)
+        mode = paymentMode(saf, journal, clock, online = online, network = network, reconcile = reconcile, io = dispatcher)
+        val takeSale = TakeSale(saf, online, journal, reconcile, mode)
+        return SaleViewModel(takeSale, mode, settings, dispatcher, errors)
     }
 
     private fun SaleViewModel.enter(vararg digits: Int) = digits.forEach(::onDigit)
@@ -310,9 +329,7 @@ class SaleViewModelTest {
 
     @Test
     fun `a sale that throws ends as an unknown outcome and is reported`() = runTest(dispatcher) {
-        val failing = ThrowingSaleTerminal(terminal)
-        val takeSale = TakeSale(failing, journal, ReconcileStoredSales(failing, journal, settings, clock))
-        val viewModel = SaleViewModel(takeSale, failing, settings, dispatcher, errors)
+        val viewModel = saleViewModel(saf = ThrowingSaleTerminal(terminal))
         viewModel.enter(5, 0, 0)
 
         viewModel.charge()
@@ -324,9 +341,7 @@ class SaleViewModelTest {
     @Test
     fun `journal failure after approval ends as an unknown outcome without try again`() = runTest(dispatcher) {
         terminal.saleOutcome = SaleOutcome.ApprovedOffline(sale("A"))
-        val failingJournal = RecordFailingJournal(journal)
-        val takeSale = TakeSale(terminal, failingJournal, ReconcileStoredSales(terminal, failingJournal, settings, clock))
-        val viewModel = SaleViewModel(takeSale, terminal, settings, dispatcher, errors)
+        val viewModel = saleViewModel(journal = RecordFailingJournal(journal))
         viewModel.enter(5, 0, 0)
 
         viewModel.charge()
@@ -389,6 +404,82 @@ class SaleViewModelTest {
 
         assertEquals(listOf("Can't cancel now — the card has been read."), messages)
         terminal.saleGate?.complete(Unit)
+    }
+
+    // --- online mode ---------------------------------------------------------------------------
+
+    /** Network up and nothing stored on the terminal: the coordinator switches to online sales. */
+    private suspend fun goOnline(viewModel: SaleViewModel) {
+        network.status.value = NetworkStatus.ONLINE
+        reconcile()
+        mode.start()
+        assertEquals(PaymentMode.ONLINE, viewModel.mode.value.mode)
+    }
+
+    @Test
+    fun `online, the sale is taken online and its receipt printed through the online API`() = runTest(dispatcher) {
+        val viewModel = saleViewModel()
+        goOnline(viewModel)
+        val approved = SaleOutcome.ApprovedOnline(sale("ON", SUCCEEDED).copy(customerReceipt = "online receipt"))
+        online.saleOutcome = approved
+
+        viewModel.enter(5, 0, 0)
+        viewModel.charge()
+        viewModel.printReceipt()
+
+        assertEquals(ChargeUiState.Result(approved), viewModel.state.value)
+        assertEquals(1, online.saleCalls)
+        assertEquals(0, terminal.saleCalls)
+        assertEquals(listOf("online receipt"), online.printed)
+        assertTrue(terminal.printed.isEmpty())
+    }
+
+    @Test
+    fun `online, card steps and cancel use the online API`() = runTest(dispatcher) {
+        val viewModel = saleViewModel()
+        goOnline(viewModel)
+        online.saleGate = CompletableDeferred()
+        viewModel.enter(5, 0, 0)
+        viewModel.charge()
+
+        val step = CardStep(CardStep.Kind.PRESENT_CARD, cancelAllowed = true)
+        online.emitCardStep(step)
+        assertEquals(ChargeUiState.InProgress(step), viewModel.state.value)
+
+        viewModel.cancel()
+        assertEquals(1, online.cancelCalls)
+        assertEquals(0, terminal.cancelCalls)
+        online.saleGate?.complete(Unit)
+    }
+
+    @Test
+    fun `online, a sale that throws ends as an online unknown outcome`() = runTest(dispatcher) {
+        val viewModel = saleViewModel(journal = RecordFailingJournal(journal))
+        goOnline(viewModel)
+        online.saleOutcome = SaleOutcome.ApprovedOnline(sale("ON", SUCCEEDED))
+
+        viewModel.enter(5, 0, 0)
+        viewModel.charge()
+
+        assertEquals(ChargeUiState.Result(SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN)), viewModel.state.value)
+    }
+
+    @Test
+    fun `charge while the mode switches stays on the amount with a message`() = runTest(dispatcher) {
+        val viewModel = saleViewModel()
+        val messages = messagesOf(viewModel)
+        online.connectsOnActivate = false
+        network.status.value = NetworkStatus.ONLINE
+        reconcile()
+        mode.start()
+        assertTrue(viewModel.mode.value.isSwitching)
+
+        viewModel.enter(5, 0, 0)
+        viewModel.charge()
+
+        assertEquals(ChargeUiState.Idle, viewModel.state.value)
+        assertEquals(0, online.saleCalls + terminal.saleCalls)
+        assertEquals(listOf("Switching between online and offline sales. Try again in a moment."), messages)
     }
 
     private companion object {

@@ -7,7 +7,8 @@ import com.handpoint.safclient.domain.AppPreferences
 import com.handpoint.safclient.domain.ErrorReporter
 import com.handpoint.safclient.domain.reportingErrors
 import com.handpoint.safclient.domain.SalesJournal
-import com.handpoint.safclient.domain.StoreAndForwardTerminal
+import com.handpoint.safclient.domain.PaymentModeCoordinator
+import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
@@ -19,9 +20,11 @@ import com.handpoint.safclient.domain.usecase.SendStoredSales
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -52,9 +55,16 @@ data class HomeUiState(
     val isSending: Boolean = false,
     /** `true` until the journal has been read once. */
     val isLoading: Boolean = true,
+    /** Online or offline, any switch in progress, and the network. */
+    val mode: ModeState = ModeState(),
 ) {
-    val canTakeSale: Boolean get() = connection == TerminalConnection.CONNECTED
-    val canSend: Boolean get() = !isSending && pendingCount > 0 && connection == TerminalConnection.CONNECTED
+    /** A sale needs a connected API and no switch in progress. */
+    val canTakeSale: Boolean get() = connection == TerminalConnection.CONNECTED && !mode.isSwitching
+
+    /** Sending needs the Store and Forward API, connected, with no switch in progress. */
+    val canSend: Boolean
+        get() = !isSending && pendingCount > 0 && connection == TerminalConnection.CONNECTED &&
+            mode.isStoreAndForwardReady
 }
 
 /**
@@ -65,16 +75,20 @@ data class HomeUiState(
  * terminal stored without reporting it still shows and can be sent. The journal counts when it
  * holds more (a sale taken after that answer), unless its total is in another currency.
  *
- * When the screen opens it connects the terminal (unless it is connected already), makes the
- * journal agree with the terminal, and then asks Handpoint about the sales whose outcome is
- * still open ([RefreshOpenStatuses]). Each time the screen comes back to the front it
- * reconciles again, at most every [RECONCILE_INTERVAL], and asks about open sales again, at
- * most every [STATUS_INTERVAL].
+ * When the screen opens it starts the payment mode rule ([PaymentModeCoordinator]), connects the
+ * payment API in use (unless it is connected already), makes the journal agree with the
+ * terminal, and then asks Handpoint about the sales whose outcome is still open
+ * ([RefreshOpenStatuses]). Each time the screen comes back to the front it reconciles again, at
+ * most every [RECONCILE_INTERVAL], and asks about open sales again, at most every
+ * [STATUS_INTERVAL].
+ *
+ * Reconcile and status questions need the Store and Forward API: Home asks them only while that
+ * API is in use, connected, and no switch runs. Online, it asks nothing.
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     journal: SalesJournal,
-    private val terminal: StoreAndForwardTerminal,
+    private val payments: PaymentModeCoordinator,
     settings: AppPreferences,
     private val reconcile: ReconcileStoredSales,
     private val statuses: RefreshOpenStatuses,
@@ -87,7 +101,7 @@ class HomeViewModel @Inject constructor(
     val uiState: StateFlow<HomeUiState> = combine(
         journal.observeAll(),
         settings.merchantName,
-        terminal.connection,
+        payments.connection,
         sendStoredSales.isRunning,
         reconcile.lastSummary,
     ) { sales, merchantName, connection, isSending, onTerminal ->
@@ -107,11 +121,12 @@ class HomeViewModel @Inject constructor(
             isSending = isSending,
             isLoading = false,
         )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-        initialValue = HomeUiState(connection = terminal.connection.value),
-    )
+    }.combine(payments.state) { state, mode -> state.copy(mode = mode) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = HomeUiState(connection = payments.connection.value, mode = payments.state.value),
+        )
 
     /** End of the last reconcile Home started; `null` until the opening reconcile is done. */
     private var lastReconcileAt: Instant? = null
@@ -119,16 +134,19 @@ class HomeViewModel @Inject constructor(
     /** Start of the last status pass Home started; `null` until the opening pass. */
     private var lastStatusPassAt: Instant? = null
 
-    private var connecting: Job = connectInBackground()
+    private var connecting: Job
 
     init {
+        payments.start()
+        connecting = connectInBackground()
         // connect() returns before the SDK has finished its set-up, and the terminal's answer
-        // is only right once it is connected. So reconcile each time the terminal becomes
-        // CONNECTED: at opening, and again after it reconnects.
+        // is only right once it is connected. So reconcile each time Store and Forward becomes
+        // ready: CONNECTED, in use, and not switching. At opening, after it reconnects, and
+        // after the app comes back from online sales.
         viewModelScope.launch {
             connecting.join()
             var opening = true
-            terminal.connection.filter { it == TerminalConnection.CONNECTED }.collect {
+            storeAndForwardReady().filter { it }.collect {
                 reconcileNow()
                 if (opening) {
                     opening = false
@@ -143,6 +161,8 @@ class HomeViewModel @Inject constructor(
 
     /** Call when the screen comes back to the front. */
     fun onResume() {
+        // Online, there is nothing to reconcile or ask: those calls need Store and Forward.
+        if (!isStoreAndForwardReady()) return
         val now = clock.instant()
         // Both are null while the opening reconcile is still running.
         lastReconcileAt?.let { last ->
@@ -164,27 +184,36 @@ class HomeViewModel @Inject constructor(
 
     /** Tries to connect the terminal again (the merchant tapped the connection chip). */
     fun retryConnection() {
-        if (connecting.isActive || terminal.connection.value == TerminalConnection.CONNECTED) return
+        if (connecting.isActive || payments.connection.value == TerminalConnection.CONNECTED) return
         connecting = connectInBackground()
     }
 
     private fun connectInBackground(): Job = viewModelScope.launch {
-        if (terminal.connection.value != TerminalConnection.CONNECTED) {
+        if (payments.connection.value != TerminalConnection.CONNECTED) {
             // The first connect() creates the SDK, which is heavy and can fail: keep it off the
             // main thread, and on failure leave the chip showing the terminal is not connected.
-            errors.reportingErrors("connect") { withContext(io) { terminal.connect() } }
+            errors.reportingErrors("connect") { withContext(io) { payments.connect() } }
         }
     }
+
+    private fun storeAndForwardReady(): Flow<Boolean> =
+        combine(payments.state, payments.connection) { mode, connection ->
+            mode.isStoreAndForwardReady && connection == TerminalConnection.CONNECTED
+        }.distinctUntilChanged()
+
+    private fun isStoreAndForwardReady(): Boolean = payments.state.value.isStoreAndForwardReady
 
     // Connect, reconcile and refresh are best effort here: when they fail, the error is
     // reported, Home keeps showing what the journal holds, and the next resume (or a tap on
     // the connection chip) tries again.
     private suspend fun reconcileNow() {
+        if (!isStoreAndForwardReady()) return
         errors.reportingErrors("reconcile") { withContext(io) { reconcile() } }
     }
 
     /** Asks Handpoint about the sales that were sent but have no final answer yet. */
     private suspend fun refreshOpenStatuses() {
+        if (!isStoreAndForwardReady()) return
         errors.reportingErrors("refresh status") { withContext(io) { statuses() } }
     }
 

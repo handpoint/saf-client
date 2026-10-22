@@ -12,9 +12,11 @@ import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.testutil.MutableClock
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -129,5 +131,53 @@ class RefreshOpenStatusesTest {
         assertEquals(3, terminal.statusRequests.size)
         assertEquals(SUCCEEDED, journal.status("a"))
         assertEquals(SUCCEEDED, journal.status("b"))
+    }
+
+    @Test
+    fun `it is active from the follow-up call until the follow-up ends`() = runTest {
+        terminal.statusAnswer = IN_PROGRESS
+        val journal = InMemoryJournal(sent("a", IN_PROGRESS, Duration.ZERO))
+        val statuses = statuses(journal)
+        assertEquals(false, statuses.isActive.value)
+
+        statuses.followUp(listOf(SaleReference("a")))
+        assertEquals(true, statuses.isActive.value) // at once, before the follow-up job runs
+
+        advanceTimeBy(119_000); runCurrent()
+        assertEquals(true, statuses.isActive.value)
+        advanceUntilIdle()
+        assertEquals(false, statuses.isActive.value)
+    }
+
+    @Test
+    fun `a replaced follow-up keeps it active until the new one ends`() = runTest {
+        terminal.statusAnswer = SUCCEEDED
+        val journal = InMemoryJournal(sent("a", IN_PROGRESS, Duration.ZERO), sent("b", IN_PROGRESS, Duration.ZERO))
+        val statuses = statuses(journal)
+
+        statuses.followUp(listOf(SaleReference("a")))
+        statuses.followUp(listOf(SaleReference("b")))
+        runCurrent()
+        assertEquals(true, statuses.isActive.value)
+
+        advanceUntilIdle()
+        assertEquals(false, statuses.isActive.value)
+    }
+
+    @Test
+    fun `it is active while a pass runs`() = runTest {
+        terminal.statusAnswer = IN_PROGRESS
+        val gate = CompletableDeferred<Unit>()
+        terminal.statusGate = gate
+        val journal = InMemoryJournal(sent("a", IN_PROGRESS, Duration.ZERO))
+        val statuses = statuses(journal)
+
+        val pass = launch { statuses() }
+        runCurrent()
+        assertEquals(true, statuses.isActive.value)
+
+        gate.complete(Unit)
+        pass.join()
+        assertEquals(false, statuses.isActive.value)
     }
 }

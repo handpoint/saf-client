@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -318,5 +319,33 @@ class SendStoredSalesTest {
         advanceTimeBy(10_000)
         runCurrent()
         assertEquals(setOf(ref("A"), ref("B")), terminal.statusRequests.toSet())
+    }
+
+    @Test
+    fun `the follow-up is active before the run reports it has ended`() = runTest {
+        terminal.statusAnswer = com.handpoint.safclient.domain.model.ProcessingStatus.IN_PROGRESS
+        terminal.forwardScript = listOf(Started(1), Sent(ref("A"), 1, 1), Finished(ForwardingResult.AllSent(1)))
+        terminal.storedSummary = StoredSummary(listOf(ref("B"), ref("C")), Money(2000, USD))
+        val statuses = RefreshOpenStatuses(journal, RefreshSaleStatus(terminal, journal, clock), clock, backgroundScope)
+        val send = SendStoredSales(
+            terminal = terminal,
+            journal = journal,
+            reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
+            statuses = statuses,
+            clock = clock,
+            appScope = backgroundScope,
+        )
+        // Whoever sees the run end must already see the follow-up, or it would take the app as idle.
+        val idleSeen = mutableListOf<Boolean>()
+        // Unconfined: the collector runs inside the very update that ends the run.
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            send.isRunning.collect { running -> if (!running) idleSeen += !statuses.isActive.value }
+        }
+        runCurrent()
+
+        send().toList()
+        runCurrent()
+
+        assertEquals(listOf(true, false), idleSeen)
     }
 }

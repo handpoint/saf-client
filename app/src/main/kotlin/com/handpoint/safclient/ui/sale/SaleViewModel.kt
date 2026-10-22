@@ -5,9 +5,13 @@ import androidx.lifecycle.viewModelScope
 import com.handpoint.safclient.di.IoDispatcher
 import com.handpoint.safclient.domain.AppPreferences
 import com.handpoint.safclient.domain.ErrorReporter
+import com.handpoint.safclient.domain.OnlineTerminal
+import com.handpoint.safclient.domain.PaymentModeCoordinator
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.CardStep
+import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.PaymentMode
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.domain.model.approvedSale
@@ -47,6 +51,9 @@ sealed interface ChargeUiState {
 /**
  * The charge flow: amount entry, the sale on the terminal, and its outcome.
  *
+ * The sale runs on the payment API in use ([PaymentModeCoordinator]): online or Store and
+ * Forward. While the app switches between them, Charge is refused with a message.
+ *
  * The sale runs in [viewModelScope], so it survives a configuration change. The screen blocks
  * back while the sale runs, so the merchant cannot leave a sale behind.
  *
@@ -61,7 +68,7 @@ sealed interface ChargeUiState {
 @HiltViewModel
 class SaleViewModel @Inject constructor(
     private val takeSale: TakeSale,
-    private val terminal: StoreAndForwardTerminal,
+    private val payments: PaymentModeCoordinator,
     settings: AppPreferences,
     @param:IoDispatcher private val io: CoroutineDispatcher,
     private val errors: ErrorReporter,
@@ -76,7 +83,11 @@ class SaleViewModel @Inject constructor(
     private val _state = MutableStateFlow<ChargeUiState>(ChargeUiState.Idle)
     val state: StateFlow<ChargeUiState> = _state.asStateFlow()
 
-    val connection: StateFlow<TerminalConnection> = terminal.connection
+    /** Connection of the payment API in use. */
+    val connection: StateFlow<TerminalConnection> = payments.connection
+
+    /** Online or offline, and any switch in progress: the amount screen and the banner show it. */
+    val mode: StateFlow<ModeState> = payments.state
 
     private val _printing = MutableStateFlow(false)
 
@@ -120,28 +131,43 @@ class SaleViewModel @Inject constructor(
         if (_state.value != ChargeUiState.Idle) return
         val money = amount.value
         if (money.minorUnits <= 0) return
+        if (payments.state.value.isSwitching) {
+            _messages.trySend(SWITCHING_MESSAGE)
+            return
+        }
+        // An error after the sale started leaves its outcome unknown, in the mode it ran in.
+        val unknown = when (payments.state.value.mode) {
+            PaymentMode.ONLINE -> OnlineTerminal.OUTCOME_UNKNOWN
+            PaymentMode.OFFLINE -> StoreAndForwardTerminal.OUTCOME_UNKNOWN
+        }
         _state.value = ChargeUiState.InProgress(step = null)
         viewModelScope.launch {
             // Card steps are hot with no replay: listen before the sale starts.
             val steps = launch(start = CoroutineStart.UNDISPATCHED) {
-                terminal.cardSteps.collect { _state.value = ChargeUiState.InProgress(it) }
+                payments.cardSteps.collect { _state.value = ChargeUiState.InProgress(it) }
             }
             val outcome = try {
                 withContext(io) { takeSale(money) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // The terminal may have stored the sale before the error (journal or reconcile failed).
+                // The sale may have gone through before the error (journal or reconcile failed).
                 errors.report("sale", e)
-                SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN)
+                SaleOutcome.Failed(unknown)
             } finally {
                 steps.cancel()
             }
-            if (outcome == SaleOutcome.Cancelled) {
-                _state.value = ChargeUiState.Idle
-                _messages.trySend("Sale cancelled.")
-            } else {
-                _state.value = ChargeUiState.Result(outcome)
+            when (outcome) {
+                SaleOutcome.Cancelled -> {
+                    _state.value = ChargeUiState.Idle
+                    _messages.trySend("Sale cancelled.")
+                }
+                // A switch started just before the sale: nothing ran, the merchant can charge again.
+                SaleOutcome.Failed(PaymentModeCoordinator.SWITCHING) -> {
+                    _state.value = ChargeUiState.Idle
+                    _messages.trySend(SWITCHING_MESSAGE)
+                }
+                else -> _state.value = ChargeUiState.Result(outcome)
             }
         }
     }
@@ -152,7 +178,7 @@ class SaleViewModel @Inject constructor(
         if (current.step?.cancelAllowed != true) return
         viewModelScope.launch {
             val cancelled = try {
-                withContext(io) { terminal.cancelSale() }
+                withContext(io) { payments.cancelSale() }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -181,7 +207,7 @@ class SaleViewModel @Inject constructor(
             val receipt = sale.customerReceipt?.takeIf { it.isNotBlank() }
                 ?: sale.merchantReceipt?.takeIf { it.isNotBlank() }
             val printed = try {
-                receipt != null && withContext(io) { terminal.printReceipt(receipt) }
+                receipt != null && withContext(io) { payments.printReceipt(receipt) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -199,5 +225,7 @@ class SaleViewModel @Inject constructor(
         const val MAX_MINOR_UNITS = 9_999_999L
 
         private val DEFAULT_CURRENCY: Currency = Currency.getInstance("USD")
+
+        private const val SWITCHING_MESSAGE = "Switching between online and offline sales. Try again in a moment."
     }
 }

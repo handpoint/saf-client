@@ -1,6 +1,9 @@
 package com.handpoint.safclient.ui.home
 
+import com.handpoint.safclient.domain.PaymentModeCoordinator
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.NetworkStatus
+import com.handpoint.safclient.domain.model.PaymentMode
 import com.handpoint.safclient.domain.model.ProcessingStatus.FAILED
 import com.handpoint.safclient.domain.model.ProcessingStatus.IN_PROGRESS
 import com.handpoint.safclient.domain.model.ProcessingStatus.NOT_FOUND
@@ -13,13 +16,19 @@ import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
 import com.handpoint.safclient.domain.usecase.RefreshOpenStatuses
 import com.handpoint.safclient.domain.usecase.RefreshSaleStatus
 import com.handpoint.safclient.domain.usecase.SendStoredSales
+import com.handpoint.safclient.testutil.FakeNetworkMonitor
+import com.handpoint.safclient.testutil.FakeOnlineTerminal
 import com.handpoint.safclient.testutil.FakePreferences
 import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal
-import com.handpoint.safclient.testutil.RecordingErrorReporter
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.testutil.MutableClock
+import com.handpoint.safclient.testutil.RecordingErrorReporter
+import com.handpoint.safclient.testutil.paymentMode
+import java.time.Duration
+import java.time.Instant
+import java.util.Currency
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,9 +47,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.time.Duration
-import java.time.Instant
-import java.util.Currency
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
@@ -50,6 +56,9 @@ class HomeViewModelTest {
     private val terminal = FakeTerminal()
     private val settings = FakePreferences()
     private val errors = RecordingErrorReporter()
+    private val online = FakeOnlineTerminal()
+    private val network = FakeNetworkMonitor(NetworkStatus.OFFLINE)
+    private lateinit var payments: PaymentModeCoordinator
 
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
@@ -64,7 +73,19 @@ class HomeViewModelTest {
         val reconcile = ReconcileStoredSales(terminal, journal, settings, clock)
         val statuses = RefreshOpenStatuses(journal, RefreshSaleStatus(terminal, journal, clock), clock, appScope)
         val send = SendStoredSales(terminal, journal, reconcile, statuses, clock, appScope)
-        val viewModel = HomeViewModel(journal, terminal, settings, reconcile, statuses, send, clock, dispatcher, errors)
+        payments = paymentMode(
+            saf = terminal,
+            journal = journal,
+            clock = clock,
+            online = online,
+            network = network,
+            reconcile = reconcile,
+            statuses = statuses,
+            send = send,
+            errors = errors,
+            io = dispatcher,
+        )
+        val viewModel = HomeViewModel(journal, payments, settings, reconcile, statuses, send, clock, dispatcher, errors)
         backgroundScope.launch(dispatcher) { viewModel.uiState.collect {} }
         return viewModel to send
     }
@@ -347,4 +368,63 @@ class HomeViewModelTest {
         assertTrue(viewModel.uiState.value.isSending)
     }
 
+    // --- online and offline modes ----------------------------------------------------------------
+
+    @Test
+    fun `with network and nothing stored, Home goes online and stops reconciling and asking`() = runTest(dispatcher) {
+        terminal.storedSummary = StoredSummary(emptyList(), null)
+        network.status.value = NetworkStatus.ONLINE
+        val journal = InMemoryJournal(sale("A", IN_PROGRESS).copy(sentAt = clock.instant()))
+        val (viewModel, _) = homeViewModel(journal)
+        runCurrent()
+        assertEquals(PaymentMode.ONLINE, viewModel.uiState.value.mode.mode)
+        val storedCalls = terminal.storedCalls
+        val statusCalls = terminal.statusRequests.size
+
+        clock.advance(Duration.ofMinutes(10))
+        viewModel.onResume()
+        runCurrent()
+
+        assertEquals(storedCalls, terminal.storedCalls)
+        assertEquals(statusCalls, terminal.statusRequests.size)
+        assertTrue(viewModel.uiState.value.canTakeSale)
+        assertFalse(viewModel.uiState.value.canSend)
+    }
+
+    @Test
+    fun `New sale and Send now are disabled while the mode switches`() = runTest(dispatcher) {
+        terminal.storedSummary = StoredSummary(listOf(SaleReference("X")), Money(500, USD))
+        online.connectsOnActivate = false
+        val (viewModel, _) = homeViewModel(InMemoryJournal())
+        runCurrent()
+        assertTrue(viewModel.uiState.value.canSend)
+
+        // The sale leaves the terminal and the network comes back: the app switches to online.
+        terminal.storedSummary = StoredSummary(emptyList(), null)
+        clock.advance(Duration.ofMinutes(1))
+        viewModel.onResume()
+        network.status.value = NetworkStatus.ONLINE
+        runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals(PaymentMode.ONLINE, state.mode.switchingTo)
+        assertFalse(state.canTakeSale)
+        assertFalse(state.canSend)
+    }
+
+    @Test
+    fun `Home reconciles again when the app comes back to store and forward`() = runTest(dispatcher) {
+        terminal.storedSummary = StoredSummary(emptyList(), null)
+        network.status.value = NetworkStatus.ONLINE
+        val (viewModel, _) = homeViewModel(InMemoryJournal())
+        runCurrent()
+        assertEquals(PaymentMode.ONLINE, viewModel.uiState.value.mode.mode)
+        val storedCalls = terminal.storedCalls
+
+        network.status.value = NetworkStatus.OFFLINE
+        runCurrent()
+
+        assertEquals(PaymentMode.OFFLINE, viewModel.uiState.value.mode.mode)
+        assertEquals(storedCalls + 1, terminal.storedCalls)
+    }
 }

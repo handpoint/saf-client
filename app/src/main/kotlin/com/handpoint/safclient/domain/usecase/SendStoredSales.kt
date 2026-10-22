@@ -94,13 +94,15 @@ class SendStoredSales @Inject constructor(
                     }
                 }
             } finally {
+                // Handpoint processes the forwarded sales asynchronously: ask for their result
+                // later. Start the follow-up before the run reports its end, so nobody watching
+                // both sees a moment with neither (the app switches to online sales when idle).
+                statuses.followUp(current.sentReferences)
                 synchronized(lock) {
                     activeRun = null
                     running.value = false
                 }
             }
-            // Handpoint processes the forwarded sales asynchronously: ask for their result later.
-            statuses.followUp(current.sentReferences)
             // The run has ended cleanly for its collectors; report the error to the scope's handler.
             error?.let { throw it }
         }

@@ -8,6 +8,9 @@ import com.handpoint.safclient.domain.model.SaleReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -33,6 +36,9 @@ import kotlin.time.Duration.Companion.seconds
  *
  * Handpoint has no batch status query: each sale is one `getTransactionProcessingStatus` call.
  * While a sale is still queued, Handpoint answers IN_PROGRESS without asking the gateway.
+ *
+ * Only the Store and Forward API answers these questions, so [isActive] tells the app not to
+ * switch to the online API meanwhile.
  */
 @Singleton
 class RefreshOpenStatuses @Inject constructor(
@@ -44,15 +50,27 @@ class RefreshOpenStatuses @Inject constructor(
     private val passes = Mutex()
     private var followUp: Job? = null
 
+    /** Passes and follow-ups in progress; [isActive] while above zero. Guarded by [active]. */
+    private var activity = 0
+    private val active = MutableStateFlow(false)
+
+    /**
+     * `true` while a pass runs or a follow-up is scheduled: from the [followUp] call (not later)
+     * until its last question is answered.
+     */
+    val isActive: StateFlow<Boolean> = active.asStateFlow()
+
     /**
      * Runs one pass over the open sales. Skipped when another pass is running.
      * Returns how many sales it asked about.
      */
     suspend operator fun invoke(): Int {
         if (!passes.tryLock()) return 0
+        begin()
         try {
             return ask(openSales())
         } finally {
+            end()
             passes.unlock()
         }
     }
@@ -65,6 +83,7 @@ class RefreshOpenStatuses @Inject constructor(
         if (references.isEmpty()) return
         val sent = references.toList()
         followUp?.cancel()
+        begin()
         followUp = appScope.launch {
             var waited = kotlin.time.Duration.ZERO
             for (at in FOLLOW_UP_AT) {
@@ -74,7 +93,20 @@ class RefreshOpenStatuses @Inject constructor(
                 if (open.isEmpty()) return@launch
                 passes.withLock { ask(open.take(MAX_PER_PASS)) }
             }
+        }.apply {
+            // Runs also when the follow-up is replaced, even before it started.
+            invokeOnCompletion { end() }
         }
+    }
+
+    private fun begin() = synchronized(active) {
+        activity++
+        active.value = true
+    }
+
+    private fun end() = synchronized(active) {
+        activity--
+        active.value = activity > 0
     }
 
     private suspend fun openSales(): List<Sale> {

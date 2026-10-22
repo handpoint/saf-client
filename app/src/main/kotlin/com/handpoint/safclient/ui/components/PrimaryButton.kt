@@ -28,9 +28,13 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.handpoint.safclient.ui.theme.SafPreviewSurface
 import com.handpoint.safclient.ui.theme.SafPreviews
+import com.handpoint.safclient.ui.theme.SafTheme
 
 /** Minimum height of a primary action; comfortably above the 56 dp touch target. */
 private val PrimaryButtonHeight = 60.dp
+
+/** Colour of a [PrimaryButton]: [Ink] by default, [Accent] for the screen's lead action next to dark content. */
+enum class ButtonEmphasis { Ink, Accent }
 
 /**
  * The single main action of a screen (Charge, Send now). Full width, 60 dp tall.
@@ -44,6 +48,7 @@ fun PrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     loading: Boolean = false,
+    emphasis: ButtonEmphasis = ButtonEmphasis.Ink,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -53,14 +58,22 @@ fun PrimaryButton(
         label = "buttonScale",
     )
     val colors = MaterialTheme.colorScheme
+    val (container, content) = when (emphasis) {
+        ButtonEmphasis.Ink -> colors.primary to colors.onPrimary
+        ButtonEmphasis.Accent -> SafTheme.colors.accentAction.let { it.container to it.content }
+    }
     // While loading the button is not clickable, but it keeps its active colours.
     val buttonColors = if (loading) {
         ButtonDefaults.buttonColors(
-            disabledContainerColor = colors.primary,
-            disabledContentColor = colors.onPrimary,
+            containerColor = container,
+            contentColor = content,
+            disabledContainerColor = container,
+            disabledContentColor = content,
         )
     } else {
         ButtonDefaults.buttonColors(
+            containerColor = container,
+            contentColor = content,
             disabledContainerColor = colors.onSurface.copy(alpha = 0.12f),
             disabledContentColor = colors.onSurface.copy(alpha = 0.38f),
         )
@@ -88,7 +101,7 @@ fun PrimaryButton(
             if (isLoading) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(22.dp),
-                    color = colors.onPrimary,
+                    color = content,
                     strokeWidth = 2.5.dp,
                 )
             } else {
@@ -105,5 +118,15 @@ private fun PrimaryButtonPreview() = SafPreviewSurface {
         PrimaryButton(text = "Charge $12.50", onClick = {})
         PrimaryButton(text = "Send now", onClick = {}, loading = true)
         PrimaryButton(text = "Charge", onClick = {}, enabled = false)
+    }
+}
+
+@SafPreviews
+@Composable
+private fun PrimaryButtonAccentPreview() = SafPreviewSurface {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        PrimaryButton(text = "New sale", onClick = {}, emphasis = ButtonEmphasis.Accent)
+        PrimaryButton(text = "New sale", onClick = {}, emphasis = ButtonEmphasis.Accent, loading = true)
+        PrimaryButton(text = "New sale", onClick = {}, emphasis = ButtonEmphasis.Accent, enabled = false)
     }
 }

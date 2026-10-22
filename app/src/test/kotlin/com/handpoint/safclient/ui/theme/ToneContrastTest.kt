@@ -7,7 +7,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 
-/** Every pill tone must keep its label readable: WCAG AA, contrast of at least 4.5:1. */
+/** Every tone (pills, accent action) must keep its label readable: WCAG AA, contrast of at least 4.5:1. */
 class ToneContrastTest {
 
     @Test
@@ -23,6 +23,7 @@ class ToneContrastTest {
             "processing" to colors.processing,
             "failed" to colors.failed,
             "neutral" to colors.neutral,
+            "accentAction" to colors.accentAction,
         ).forEach { (name, tone) ->
             val ratio = contrast(tone.content, tone.container)
             assertTrue("$theme $name contrast is $ratio, below 4.5", ratio >= 4.5)

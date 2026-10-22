@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.handpoint.safclient.di.IoDispatcher
 import com.handpoint.safclient.domain.AppPreferences
+import com.handpoint.safclient.domain.ErrorReporter
 import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.Money
@@ -68,6 +69,7 @@ class HomeViewModel @Inject constructor(
     sendStoredSales: SendStoredSales,
     private val clock: Clock,
     @param:IoDispatcher private val io: CoroutineDispatcher,
+    private val errors: ErrorReporter,
 ) : ViewModel() {
 
     val uiState: StateFlow<HomeUiState> = combine(
@@ -93,28 +95,26 @@ class HomeViewModel @Inject constructor(
         initialValue = HomeUiState(connection = terminal.connection.value),
     )
 
-    /** The opening reconcile counts as the first one, so the resume that follows it is skipped. */
-    private var lastReconcileAt: Instant = clock.instant()
+    /** End of the last reconcile Home started; `null` until the opening reconcile is done. */
+    private var lastReconcileAt: Instant? = null
 
-    private val connecting: Job = viewModelScope.launch {
-        if (terminal.connection.value != TerminalConnection.CONNECTED) {
-            // The first connect() creates the SDK, which is heavy: keep it off the main thread.
-            withContext(io) { terminal.connect() }
-        }
-    }
+    private var connecting: Job = connectInBackground()
 
     init {
         viewModelScope.launch {
             connecting.join()
             reconcileNow()
+            // The throttle counts from here, so the resume that follows the opening is skipped.
+            lastReconcileAt = clock.instant()
             refreshOpenStatuses(journal)
         }
     }
 
     /** Call when the screen comes back to the front. */
     fun onResume() {
+        val last = lastReconcileAt ?: return // the opening reconcile is still running
         val now = clock.instant()
-        if (Duration.between(lastReconcileAt, now) < RECONCILE_INTERVAL) return
+        if (Duration.between(last, now) < RECONCILE_INTERVAL) return
         lastReconcileAt = now
         viewModelScope.launch {
             connecting.join()
@@ -122,30 +122,49 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    /** Tries to connect the terminal again (the merchant tapped the connection chip). */
+    fun retryConnection() {
+        if (connecting.isActive || terminal.connection.value == TerminalConnection.CONNECTED) return
+        connecting = connectInBackground()
+        viewModelScope.launch {
+            connecting.join()
+            reconcileNow()
+        }
+    }
+
+    private fun connectInBackground(): Job = viewModelScope.launch {
+        if (terminal.connection.value != TerminalConnection.CONNECTED) {
+            // The first connect() creates the SDK, which is heavy and can fail: keep it off the
+            // main thread, and on failure leave the chip showing the terminal is not connected.
+            reportingErrors("connect") { withContext(io) { terminal.connect() } }
+        }
+    }
+
     private suspend fun reconcileNow() {
-        ignoringErrors { withContext(io) { reconcile() } }
+        reportingErrors("reconcile") { withContext(io) { reconcile() } }
     }
 
     /** Asks the gateway about today's sales that were sent but have no final answer yet. */
     private suspend fun refreshOpenStatuses(journal: SalesJournal) {
         journal.observeAll().first()
             .filter { it.status in OPEN_STATUSES && it.approvedAt.isToday() }
-            .forEach { sale -> ignoringErrors { withContext(io) { refresh(sale.reference) } } }
+            .forEach { sale -> reportingErrors("refresh status") { withContext(io) { refresh(sale.reference) } } }
     }
 
     private fun Instant.isToday(): Boolean = atZone(clock.zone).toLocalDate() == LocalDate.now(clock)
 
     /**
-     * Reconcile and refresh are best effort here: when they fail, Home keeps showing what the
-     * journal holds, and the next resume (or the next screen open) tries again.
+     * Connect, reconcile and refresh are best effort here: when they fail, the error is
+     * reported, Home keeps showing what the journal holds, and the next resume (or a tap on
+     * the connection chip) tries again.
      */
-    private inline fun ignoringErrors(block: () -> Unit) {
+    private inline fun reportingErrors(where: String, block: () -> Unit) {
         try {
             block()
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
-            // Keep the journal's view; see the function comment.
+        } catch (e: Exception) {
+            errors.report(where, e)
         }
     }
 

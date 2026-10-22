@@ -1,7 +1,6 @@
 package com.handpoint.safclient.di
 
 import android.content.Context
-import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
@@ -16,7 +15,9 @@ import com.handpoint.safclient.data.journal.RoomSalesJournal
 import com.handpoint.safclient.data.journal.SafDatabase
 import com.handpoint.safclient.data.journal.SaleDao
 import com.handpoint.safclient.data.settings.AppSettings
+import com.handpoint.safclient.data.logging.LogcatErrorReporter
 import com.handpoint.safclient.domain.AppPreferences
+import com.handpoint.safclient.domain.ErrorReporter
 import com.handpoint.safclient.domain.ApplicationScope
 import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
@@ -84,15 +85,17 @@ object AppModule {
     @Provides
     @Singleton
     @ApplicationScope
-    fun provideApplicationScope(): CoroutineScope = CoroutineScope(
+    fun provideApplicationScope(reporter: ErrorReporter): CoroutineScope = CoroutineScope(
         SupervisorJob() + Dispatchers.Default +
-            // Safety net: an error in app-wide work is logged, not a crash.
-            CoroutineExceptionHandler { _, error -> Log.e(TAG, "Unhandled error in app scope", error) },
+            // Safety net: an error in app-wide work is reported, not a crash.
+            CoroutineExceptionHandler { _, error -> reporter.report("app scope", error) },
     )
+
+    @Provides
+    @Singleton
+    fun provideErrorReporter(): ErrorReporter = LogcatErrorReporter()
 
     @Provides
     @IoDispatcher
     fun provideIoDispatcher(): CoroutineDispatcher = Dispatchers.IO
-
-    private const val TAG = "SafClient"
 }

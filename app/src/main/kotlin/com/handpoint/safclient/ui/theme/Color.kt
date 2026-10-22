@@ -43,6 +43,8 @@ data class SafColors(
     val hairline: Color,
     val keySurface: Color,
     val accent: Color,
+    /** Filled accent action (New sale): label on accent, WCAG AA in both themes. */
+    val accentAction: Tone,
 )
 
 internal val LightSafColors = SafColors(
@@ -55,6 +57,7 @@ internal val LightSafColors = SafColors(
     hairline = Hairline,
     keySurface = CardWhite,
     accent = Accent,
+    accentAction = Tone(content = Color.White, container = Accent),
 )
 
 internal val DarkSafColors = SafColors(
@@ -67,4 +70,5 @@ internal val DarkSafColors = SafColors(
     hairline = HairlineDark,
     keySurface = CardDark,
     accent = AccentDark,
+    accentAction = Tone(content = CanvasDark, container = AccentDark),
 )

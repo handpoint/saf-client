@@ -15,8 +15,10 @@ import com.handpoint.safclient.domain.usecase.SendStoredSales
 import com.handpoint.safclient.testutil.FakePreferences
 import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal
+import com.handpoint.safclient.testutil.RecordingErrorReporter
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -46,6 +48,7 @@ class HomeViewModelTest {
     private val clock = MutableClock(Instant.parse("2026-10-22T12:00:00Z"))
     private val terminal = FakeTerminal()
     private val settings = FakePreferences()
+    private val errors = RecordingErrorReporter()
 
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
@@ -60,7 +63,7 @@ class HomeViewModelTest {
         val reconcile = ReconcileStoredSales(terminal, journal, settings, clock)
         val refresh = RefreshSaleStatus(terminal, journal, clock)
         val send = SendStoredSales(terminal, journal, reconcile, clock, appScope)
-        val viewModel = HomeViewModel(journal, terminal, settings, reconcile, refresh, send, clock, dispatcher)
+        val viewModel = HomeViewModel(journal, terminal, settings, reconcile, refresh, send, clock, dispatcher, errors)
         backgroundScope.launch(dispatcher) { viewModel.uiState.collect {} }
         return viewModel to send
     }
@@ -126,6 +129,66 @@ class HomeViewModelTest {
         clock.advance(Duration.ofSeconds(1))
         viewModel.onResume()
         assertEquals(2, terminal.storedCalls)
+    }
+
+    @Test
+    fun `the 30 second throttle starts when the opening reconcile ends`() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        terminal.storedGate = gate
+        val (viewModel, _) = homeViewModel(InMemoryJournal())
+
+        clock.advance(Duration.ofSeconds(40))
+        viewModel.onResume() // the opening reconcile is still running
+        assertEquals(1, terminal.storedCalls)
+
+        gate.complete(Unit) // the opening reconcile ends now
+        clock.advance(Duration.ofSeconds(29))
+        viewModel.onResume()
+        assertEquals(1, terminal.storedCalls)
+
+        clock.advance(Duration.ofSeconds(1))
+        viewModel.onResume()
+        assertEquals(2, terminal.storedCalls)
+    }
+
+    @Test
+    fun `a failing connect is reported and Home still reconciles`() = runTest(dispatcher) {
+        terminal.connectionState.value = TerminalConnection.DISCONNECTED
+        val failure = IllegalStateException("SDK cannot be created")
+        terminal.connectError = failure
+        val (viewModel, _) = homeViewModel(InMemoryJournal())
+
+        assertEquals(1, terminal.storedCalls)
+        assertEquals(TerminalConnection.DISCONNECTED, viewModel.uiState.value.connection)
+        assertFalse(viewModel.uiState.value.canTakeSale)
+        assertEquals(listOf("connect" to failure.message), errors.summary())
+    }
+
+    @Test
+    fun `a failing reconcile is reported`() = runTest(dispatcher) {
+        val failure = IllegalStateException("terminal busy")
+        terminal.storedError = failure
+        val (viewModel, _) = homeViewModel(InMemoryJournal(sale("A", STORED)))
+
+        assertEquals(listOf("reconcile" to failure.message), errors.summary())
+        assertEquals(1, viewModel.uiState.value.pendingCount)
+    }
+
+    @Test
+    fun `retrying the connection connects again and reconciles`() = runTest(dispatcher) {
+        terminal.connectionState.value = TerminalConnection.DISCONNECTED
+        terminal.connectError = IllegalStateException("SDK cannot be created")
+        val (viewModel, _) = homeViewModel(InMemoryJournal())
+
+        terminal.connectError = null
+        viewModel.retryConnection()
+
+        assertEquals(2, terminal.connectCalls)
+        assertEquals(2, terminal.storedCalls)
+        assertEquals(TerminalConnection.CONNECTED, viewModel.uiState.value.connection)
+
+        viewModel.retryConnection() // already connected: nothing to do
+        assertEquals(2, terminal.connectCalls)
     }
 
     @Test

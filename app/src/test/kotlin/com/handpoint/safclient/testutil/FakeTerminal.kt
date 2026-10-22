@@ -10,6 +10,7 @@ import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.model.TerminalConnection
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +36,12 @@ class FakeTerminal : StoreAndForwardTerminal {
 
     /** Thrown by [storedOnTerminal] when set. */
     var storedError: Exception? = null
+
+    /** When set, [storedOnTerminal] waits for it before it answers, to hold a reconcile mid-way. */
+    var storedGate: CompletableDeferred<Unit>? = null
+
+    /** Thrown by [connect] when set, as when the SDK cannot be created. */
+    var connectError: Exception? = null
 
     /** Emitted on [forwarding] as soon as [forward] accepts a run. Leave empty to drive events by hand. */
     var forwardScript: List<ForwardingEvent> = emptyList()
@@ -64,6 +71,7 @@ class FakeTerminal : StoreAndForwardTerminal {
 
     override fun connect(): Boolean {
         connectCalls++
+        connectError?.let { throw it }
         connectionState.value = TerminalConnection.CONNECTED
         return true
     }
@@ -79,6 +87,7 @@ class FakeTerminal : StoreAndForwardTerminal {
 
     override suspend fun storedOnTerminal(): StoredSummary? {
         storedCalls++
+        storedGate?.await()
         storedError?.let { throw it }
         return storedSummary
     }

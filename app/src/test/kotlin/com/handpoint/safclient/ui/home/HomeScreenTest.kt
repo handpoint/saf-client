@@ -1,9 +1,12 @@
 package com.handpoint.safclient.ui.home
 
+import androidx.compose.ui.test.assertHasNoClickAction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.handpoint.safclient.domain.model.Money
@@ -27,6 +30,7 @@ class HomeScreenTest {
 
     private var sendClicks = 0
     private var settingsClicks = 0
+    private var retryClicks = 0
 
     private val storedYesterday = sale("old", ProcessingStatus.STORED, minorUnits = 4700)
     private val succeededToday = sale("new", ProcessingStatus.SUCCEEDED, minorUnits = 820)
@@ -49,6 +53,7 @@ class HomeScreenTest {
                 onSendNow = { sendClicks++ },
                 onOpenSale = {},
                 onOpenSettings = { settingsClicks++ },
+                onRetryConnection = { retryClicks++ },
             )
         }
     }
@@ -91,6 +96,7 @@ class HomeScreenTest {
 
         compose.onNodeWithText("View").performClick()
 
+        compose.onNodeWithTag(LIST_HEADER_TAG).assertIsDisplayed()
         compose.onNodeWithContentDescription("$8.20,", substring = true).assertDoesNotExist()
         compose.onNodeWithContentDescription("$47.00,", substring = true).assertExists()
     }
@@ -100,5 +106,19 @@ class HomeScreenTest {
         show(waiting)
         compose.onNodeWithContentDescription("Settings").performClick()
         assertEquals(1, settingsClicks)
+    }
+
+    @Test
+    fun tappingTheChipRetriesWhenDisconnected() {
+        show(waiting.copy(connection = TerminalConnection.DISCONNECTED))
+        compose.onNodeWithText("Disconnected").performClick()
+        assertEquals(1, retryClicks)
+    }
+
+    @Test
+    fun theChipDoesNothingWhenConnected() {
+        show(waiting)
+        compose.onNodeWithText("Connected").assertHasNoClickAction().performClick()
+        assertEquals(0, retryClicks)
     }
 }

@@ -1,6 +1,10 @@
 package com.handpoint.safclient.ui.home
 
 import androidx.compose.foundation.background
+import com.handpoint.safclient.ui.theme.PillShape
+import com.handpoint.safclient.ui.components.ButtonEmphasis
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -72,6 +76,9 @@ import java.util.Currency
 /** Which sales the list below the hero card shows. */
 internal enum class HomeFilter { TODAY, STORED }
 
+/** Test tag of the list header (Today / Waiting to send filters). */
+internal const val LIST_HEADER_TAG = "home-list-header"
+
 /** Index of the list header in the Home list: after the hero card and the New sale block. */
 private const val LIST_HEADER_INDEX = 2
 
@@ -92,6 +99,7 @@ fun HomeRoute(
         onSendNow = onSendNow,
         onOpenSale = onOpenSale,
         onOpenSettings = onOpenSettings,
+        onRetryConnection = viewModel::retryConnection,
     )
 }
 
@@ -107,6 +115,7 @@ fun HomeScreen(
     onSendNow: () -> Unit,
     onOpenSale: (SaleReference) -> Unit,
     onOpenSettings: () -> Unit,
+    onRetryConnection: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var filter by rememberSaveable { mutableStateOf(HomeFilter.TODAY) }
@@ -123,7 +132,7 @@ fun HomeScreen(
                     Text(state.merchantName, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 actions = {
-                    ConnectionChip(state.connection)
+                    ConnectionStatus(state.connection, onRetryConnection)
                     IconButton(onClick = onOpenSettings) {
                         Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
                     }
@@ -272,7 +281,7 @@ private fun CardButton(
 @Composable
 private fun NewSale(enabled: Boolean, onNewSale: () -> Unit) {
     Column(Modifier.padding(top = 12.dp)) {
-        PrimaryButton(text = "New sale", onClick = onNewSale, enabled = enabled)
+        PrimaryButton(text = "New sale", onClick = onNewSale, enabled = enabled, emphasis = ButtonEmphasis.Accent)
         if (!enabled) {
             Text(
                 text = "Connect the terminal to take sales",
@@ -287,11 +296,29 @@ private fun NewSale(enabled: Boolean, onNewSale: () -> Unit) {
     }
 }
 
+/**
+ * The connection chip. When the terminal is not connected, a tap tries to connect again;
+ * screen readers announce it as a button.
+ */
+@Composable
+private fun ConnectionStatus(connection: TerminalConnection, onRetry: () -> Unit) {
+    val canRetry = connection == TerminalConnection.DISCONNECTED || connection == TerminalConnection.NOT_CONFIGURED
+    val modifier = if (canRetry) {
+        Modifier
+            .clip(PillShape)
+            .clickable(role = Role.Button, onClickLabel = "Connect the terminal", onClick = onRetry)
+    } else {
+        Modifier
+    }
+    ConnectionChip(connection, modifier)
+}
+
 @Composable
 private fun ListHeader(filter: HomeFilter, storedCount: Int, onFilter: (HomeFilter) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag(LIST_HEADER_TAG)
             .padding(top = 20.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -347,7 +374,7 @@ private fun GroupedRow(index: Int, count: Int, content: @Composable () -> Unit) 
 @SafPreviews
 @Composable
 private fun HomeScreenPreview() = SafTheme {
-    HomeScreen(previewState(), onNewSale = {}, onSendNow = {}, onOpenSale = {}, onOpenSettings = {})
+    HomeScreen(previewState(), onNewSale = {}, onSendNow = {}, onOpenSale = {}, onOpenSettings = {}, onRetryConnection = {})
 }
 
 @SafPreviews
@@ -359,6 +386,7 @@ private fun HomeScreenOfflinePreview() = SafTheme {
         onSendNow = {},
         onOpenSale = {},
         onOpenSettings = {},
+        onRetryConnection = {},
     )
 }
 

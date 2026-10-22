@@ -50,16 +50,20 @@ class SendStoredSalesTest {
      * The app scope runs on the test scheduler but is not a child of the test, like the real
      * app scope outlives screens. (backgroundScope would not be driven by advanceUntilIdle.)
      */
-    private fun TestScope.sendStoredSales() = SendStoredSales(
-        terminal = terminal,
-        journal = journal,
-        reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
-        clock = clock,
-        appScope = CoroutineScope(
+    private fun TestScope.sendStoredSales(): SendStoredSales {
+        val appScope = CoroutineScope(
             StandardTestDispatcher(testScheduler) + SupervisorJob() +
                 CoroutineExceptionHandler { _, error -> reportedErrors += error },
-        ),
-    )
+        )
+        return SendStoredSales(
+            terminal = terminal,
+            journal = journal,
+            reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
+            statuses = RefreshOpenStatuses(journal, RefreshSaleStatus(terminal, journal, clock), clock, appScope),
+            clock = clock,
+            appScope = appScope,
+        )
+    }
 
     private fun ref(value: String) = SaleReference(value)
 
@@ -224,15 +228,17 @@ class SendStoredSalesTest {
         }
         terminal.forwardScript = listOf(Started(3), Sent(ref("A"), 1, 3), Sent(ref("B"), 2, 3))
         terminal.storedSummary = StoredSummary(listOf(ref("C")), Money(1000, USD))
+        val appScope = CoroutineScope(
+            StandardTestDispatcher(testScheduler) + SupervisorJob() +
+                CoroutineExceptionHandler { _, error -> reportedErrors += error },
+        )
         val send = SendStoredSales(
             terminal = terminal,
             journal = failingJournal,
             reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
+            statuses = RefreshOpenStatuses(journal, RefreshSaleStatus(terminal, journal, clock), clock, appScope),
             clock = clock,
-            appScope = CoroutineScope(
-                StandardTestDispatcher(testScheduler) + SupervisorJob() +
-                    CoroutineExceptionHandler { _, error -> reportedErrors += error },
-            ),
+            appScope = appScope,
         )
 
         val events = send().toList()
@@ -297,5 +303,20 @@ class SendStoredSalesTest {
         advanceUntilIdle()
 
         assertEquals(done, events.last())
+    }
+
+    @Test
+    fun `after a run the sales just sent are asked about, not before`() = runTest {
+        terminal.statusAnswer = com.handpoint.safclient.domain.model.ProcessingStatus.SUCCEEDED
+        terminal.forwardScript = listOf(Started(2), Sent(ref("A"), 1, 2), Sent(ref("B"), 2, 2), Finished(ForwardingResult.AllSent(2)))
+        terminal.storedSummary = StoredSummary(listOf(ref("C")), Money(1000, USD))
+
+        sendStoredSales()().toList()
+        runCurrent()
+        assertEquals(0, terminal.statusRequests.size)
+
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertEquals(setOf(ref("A"), ref("B")), terminal.statusRequests.toSet())
     }
 }

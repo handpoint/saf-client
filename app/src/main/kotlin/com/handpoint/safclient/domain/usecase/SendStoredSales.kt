@@ -6,6 +6,7 @@ import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.ForwardingError
 import com.handpoint.safclient.domain.model.ForwardingEvent
 import com.handpoint.safclient.domain.model.ForwardingResult
+import com.handpoint.safclient.domain.model.SaleReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -48,6 +49,7 @@ class SendStoredSales @Inject constructor(
     private val terminal: StoreAndForwardTerminal,
     private val journal: SalesJournal,
     private val reconcile: ReconcileStoredSales,
+    private val statuses: RefreshOpenStatuses,
     private val clock: Clock,
     @param:ApplicationScope private val appScope: CoroutineScope,
 ) {
@@ -97,6 +99,8 @@ class SendStoredSales @Inject constructor(
                     running.value = false
                 }
             }
+            // Handpoint processes the forwarded sales asynchronously: ask for their result later.
+            statuses.followUp(current.sentReferences)
             // The run has ended cleanly for its collectors; report the error to the scope's handler.
             error?.let { throw it }
         }
@@ -106,6 +110,7 @@ class SendStoredSales @Inject constructor(
     /** State of one forwarding run. */
     private inner class Run(val events: MutableSharedFlow<ForwardingEvent>) {
         var accepted = false
+        val sentReferences = mutableListOf<SaleReference>()
         private var ended = false
         private var sent = 0
         private var total = 0
@@ -140,6 +145,7 @@ class SendStoredSales @Inject constructor(
                 is ForwardingEvent.Started -> total = event.total
                 is ForwardingEvent.Sent -> {
                     journal.markSent(event.reference, clock.instant())
+                    sentReferences += event.reference
                     sent = event.sent
                     total = event.total
                 }

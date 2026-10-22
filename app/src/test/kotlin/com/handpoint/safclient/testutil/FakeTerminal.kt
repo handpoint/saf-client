@@ -27,6 +27,9 @@ class FakeTerminal : StoreAndForwardTerminal {
     var saleOutcome: SaleOutcome = SaleOutcome.Cancelled
     var storedSummary: StoredSummary? = StoredSummary(emptyList(), null)
     var statusAnswer: ProcessingStatus? = null
+
+    /** Per-sale answers for [processingStatus]; a sale not listed gets [statusAnswer]. */
+    val statusAnswers = mutableMapOf<SaleReference, ProcessingStatus?>()
     var deleteResult: DeleteResult = DeleteResult.DELETED
     var forwardAccepted: Boolean = true
 
@@ -137,7 +140,7 @@ class FakeTerminal : StoreAndForwardTerminal {
         statusRequests += reference
         statusGate?.await()
         statusError?.let { throw it }
-        return statusAnswer
+        return if (reference in statusAnswers) statusAnswers[reference] else statusAnswer
     }
 
     override suspend fun delete(reference: SaleReference): DeleteResult = deleteResult

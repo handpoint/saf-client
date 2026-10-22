@@ -14,7 +14,7 @@ import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
-import com.handpoint.safclient.domain.usecase.RefreshSaleStatus
+import com.handpoint.safclient.domain.usecase.RefreshOpenStatuses
 import com.handpoint.safclient.domain.usecase.SendStoredSales
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,9 +66,10 @@ data class HomeUiState(
  * holds more (a sale taken after that answer), unless its total is in another currency.
  *
  * When the screen opens it connects the terminal (unless it is connected already), makes the
- * journal agree with the terminal, and then asks the gateway once about today's sales whose
- * outcome is still open. Each time the screen comes back to the front it reconciles again, at
- * most every [RECONCILE_INTERVAL].
+ * journal agree with the terminal, and then asks Handpoint about the sales whose outcome is
+ * still open ([RefreshOpenStatuses]). Each time the screen comes back to the front it
+ * reconciles again, at most every [RECONCILE_INTERVAL], and asks about open sales again, at
+ * most every [STATUS_INTERVAL].
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -77,7 +77,7 @@ class HomeViewModel @Inject constructor(
     private val terminal: StoreAndForwardTerminal,
     settings: AppPreferences,
     private val reconcile: ReconcileStoredSales,
-    private val refresh: RefreshSaleStatus,
+    private val statuses: RefreshOpenStatuses,
     sendStoredSales: SendStoredSales,
     private val clock: Clock,
     @param:IoDispatcher private val io: CoroutineDispatcher,
@@ -116,6 +116,9 @@ class HomeViewModel @Inject constructor(
     /** End of the last reconcile Home started; `null` until the opening reconcile is done. */
     private var lastReconcileAt: Instant? = null
 
+    /** Start of the last status pass Home started; `null` until the opening pass. */
+    private var lastStatusPassAt: Instant? = null
+
     private var connecting: Job = connectInBackground()
 
     init {
@@ -131,7 +134,8 @@ class HomeViewModel @Inject constructor(
                     opening = false
                     // The throttle counts from here, so the resume that follows the opening is skipped.
                     lastReconcileAt = clock.instant()
-                    refreshOpenStatuses(journal)
+                    lastStatusPassAt = clock.instant()
+                    refreshOpenStatuses()
                 }
             }
         }
@@ -139,13 +143,22 @@ class HomeViewModel @Inject constructor(
 
     /** Call when the screen comes back to the front. */
     fun onResume() {
-        val last = lastReconcileAt ?: return // the opening reconcile is still running
         val now = clock.instant()
-        if (Duration.between(last, now) < RECONCILE_INTERVAL) return
-        lastReconcileAt = now
-        viewModelScope.launch {
-            connecting.join()
-            reconcileNow()
+        // Both are null while the opening reconcile is still running.
+        lastReconcileAt?.let { last ->
+            if (Duration.between(last, now) >= RECONCILE_INTERVAL) {
+                lastReconcileAt = now
+                viewModelScope.launch {
+                    connecting.join()
+                    reconcileNow()
+                }
+            }
+        }
+        lastStatusPassAt?.let { last ->
+            if (Duration.between(last, now) >= STATUS_INTERVAL) {
+                lastStatusPassAt = now
+                viewModelScope.launch { refreshOpenStatuses() }
+            }
         }
     }
 
@@ -170,11 +183,9 @@ class HomeViewModel @Inject constructor(
         errors.reportingErrors("reconcile") { withContext(io) { reconcile() } }
     }
 
-    /** Asks the gateway about today's sales that were sent but have no final answer yet. */
-    private suspend fun refreshOpenStatuses(journal: SalesJournal) {
-        journal.observeAll().first()
-            .filter { it.status in OPEN_STATUSES && it.approvedAt.isToday() }
-            .forEach { sale -> errors.reportingErrors("refresh status") { withContext(io) { refresh(sale.reference) } } }
+    /** Asks Handpoint about the sales that were sent but have no final answer yet. */
+    private suspend fun refreshOpenStatuses() {
+        errors.reportingErrors("refresh status") { withContext(io) { statuses() } }
     }
 
     private fun Instant.isToday(): Boolean = atZone(clock.zone).toLocalDate() == LocalDate.now(clock)
@@ -183,8 +194,10 @@ class HomeViewModel @Inject constructor(
         /** Shortest time between two reconciles caused by the screen coming back. */
         val RECONCILE_INTERVAL: Duration = Duration.ofSeconds(30)
 
+        /** Shortest time between two status passes caused by the screen coming back. */
+        val STATUS_INTERVAL: Duration = Duration.ofMinutes(5)
+
         private const val STOP_TIMEOUT_MILLIS = 5_000L
-        private val OPEN_STATUSES = setOf(ProcessingStatus.IN_PROGRESS, ProcessingStatus.NOT_FOUND)
     }
 }
 

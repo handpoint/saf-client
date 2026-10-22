@@ -10,6 +10,7 @@ import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
+import com.handpoint.safclient.domain.usecase.RefreshOpenStatuses
 import com.handpoint.safclient.domain.usecase.RefreshSaleStatus
 import com.handpoint.safclient.domain.usecase.SendStoredSales
 import com.handpoint.safclient.testutil.FakePreferences
@@ -61,9 +62,9 @@ class HomeViewModelTest {
         appScope: CoroutineScope = backgroundScope,
     ): Pair<HomeViewModel, SendStoredSales> {
         val reconcile = ReconcileStoredSales(terminal, journal, settings, clock)
-        val refresh = RefreshSaleStatus(terminal, journal, clock)
-        val send = SendStoredSales(terminal, journal, reconcile, clock, appScope)
-        val viewModel = HomeViewModel(journal, terminal, settings, reconcile, refresh, send, clock, dispatcher, errors)
+        val statuses = RefreshOpenStatuses(journal, RefreshSaleStatus(terminal, journal, clock), clock, appScope)
+        val send = SendStoredSales(terminal, journal, reconcile, statuses, clock, appScope)
+        val viewModel = HomeViewModel(journal, terminal, settings, reconcile, statuses, send, clock, dispatcher, errors)
         backgroundScope.launch(dispatcher) { viewModel.uiState.collect {} }
         return viewModel to send
     }
@@ -313,6 +314,24 @@ class HomeViewModelTest {
         assertEquals(setOf("sent", "unknown"), terminal.statusRequests.map(SaleReference::value).toSet())
         assertEquals(2, terminal.statusRequests.size)
         assertEquals(SUCCEEDED, journal.status("sent"))
+    }
+
+    @Test
+    fun `coming back asks about open sales again at most every five minutes`() = runTest(dispatcher) {
+        terminal.storedSummary = null
+        terminal.statusAnswer = IN_PROGRESS
+        val (viewModel, _) = homeViewModel(InMemoryJournal(sale("sent", IN_PROGRESS)))
+        assertEquals(1, terminal.statusRequests.size) // the opening pass
+
+        clock.advance(Duration.ofMinutes(4))
+        viewModel.onResume()
+        runCurrent()
+        assertEquals(1, terminal.statusRequests.size)
+
+        clock.advance(Duration.ofMinutes(1))
+        viewModel.onResume()
+        runCurrent()
+        assertEquals(2, terminal.statusRequests.size)
     }
 
     @Test

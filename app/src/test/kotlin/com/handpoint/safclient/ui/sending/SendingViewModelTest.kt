@@ -10,6 +10,8 @@ import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
+import com.handpoint.safclient.domain.usecase.RefreshOpenStatuses
+import com.handpoint.safclient.domain.usecase.RefreshSaleStatus
 import com.handpoint.safclient.domain.usecase.SendStoredSales
 import com.handpoint.safclient.testutil.FakePreferences
 import com.handpoint.safclient.testutil.FakeTerminal
@@ -64,13 +66,17 @@ class SendingViewModelTest {
     fun tearDown() = Dispatchers.resetMain()
 
     /** The app scope outlives the screen, as in the app: it is not a child of the test. */
-    private fun TestScope.sendStoredSales() = SendStoredSales(
-        terminal = terminal,
-        journal = journal,
-        reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
-        clock = clock,
-        appScope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()),
-    )
+    private fun TestScope.sendStoredSales(): SendStoredSales {
+        val appScope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob())
+        return SendStoredSales(
+            terminal = terminal,
+            journal = journal,
+            reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
+            statuses = RefreshOpenStatuses(journal, RefreshSaleStatus(terminal, journal, clock), clock, appScope),
+            clock = clock,
+            appScope = appScope,
+        )
+    }
 
     private fun TestScope.sendingViewModel(send: SendStoredSales = sendStoredSales()) =
         SendingViewModel(send, journal, errors)

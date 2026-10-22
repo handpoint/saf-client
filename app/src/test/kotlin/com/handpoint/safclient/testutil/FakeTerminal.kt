@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * Scripted stand-in for the terminal port. Set the answers before the call under test;
@@ -43,6 +42,12 @@ class FakeTerminal : StoreAndForwardTerminal {
     /** Thrown by [connect] when set, as when the SDK cannot be created. */
     var connectError: Exception? = null
 
+    /** When set, [sale] waits for it before it answers, to hold a sale in progress. */
+    var saleGate: CompletableDeferred<Unit>? = null
+
+    /** Answer of [printReceipt]; `false` acts as a terminal without a printer. */
+    var printAccepted: Boolean = true
+
     /** Emitted on [forwarding] as soon as [forward] accepts a run. Leave empty to drive events by hand. */
     var forwardScript: List<ForwardingEvent> = emptyList()
 
@@ -54,6 +59,11 @@ class FakeTerminal : StoreAndForwardTerminal {
         private set
     var connectCalls = 0
         private set
+    var cancelCalls = 0
+        private set
+
+    /** Receipts sent to [printReceipt], in call order. */
+    val printed = mutableListOf<String>()
 
     /** References asked about through [processingStatus], in call order. */
     val statusRequests = mutableListOf<SaleReference>()
@@ -63,7 +73,11 @@ class FakeTerminal : StoreAndForwardTerminal {
     /** Current connection; set it to script what the app sees. [connect] moves it to CONNECTED. */
     val connectionState = MutableStateFlow(TerminalConnection.CONNECTED)
     override val connection: StateFlow<TerminalConnection> = connectionState
-    override val cardSteps: Flow<CardStep> = emptyFlow()
+    private val cardStepEvents = MutableSharedFlow<CardStep>(extraBufferCapacity = 16)
+    override val cardSteps: Flow<CardStep> = cardStepEvents.asSharedFlow()
+
+    /** Emits one card prompt, as the SDK would during a sale. */
+    suspend fun emitCardStep(step: CardStep) = cardStepEvents.emit(step)
     override val forwarding: SharedFlow<ForwardingEvent> = forwardingEvents.asSharedFlow()
 
     /** Emits one forwarding event, as the SDK would during a run. */
@@ -80,10 +94,14 @@ class FakeTerminal : StoreAndForwardTerminal {
 
     override suspend fun sale(amount: Money): SaleOutcome {
         saleCalls++
+        saleGate?.await()
         return saleOutcome
     }
 
-    override fun cancelSale(): Boolean = true
+    override fun cancelSale(): Boolean {
+        cancelCalls++
+        return true
+    }
 
     override suspend fun storedOnTerminal(): StoredSummary? {
         storedCalls++
@@ -106,5 +124,8 @@ class FakeTerminal : StoreAndForwardTerminal {
 
     override suspend fun delete(reference: SaleReference): DeleteResult = deleteResult
 
-    override fun printReceipt(receipt: String): Boolean = true
+    override fun printReceipt(receipt: String): Boolean {
+        printed += receipt
+        return printAccepted
+    }
 }

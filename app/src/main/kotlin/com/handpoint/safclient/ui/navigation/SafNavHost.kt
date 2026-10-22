@@ -11,6 +11,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.handpoint.safclient.ui.home.HomeRoute
+import com.handpoint.safclient.ui.sale.SaleRoute
+import com.handpoint.safclient.ui.sending.SendingRoute
 
 /** The app's screens and how they link. Start: [Routes.HOME]. */
 @Composable
@@ -35,8 +37,8 @@ fun SafNavHost(
                 onOpenSettings = { open(Routes.SETTINGS) },
             )
         }
-        composable(Routes.AMOUNT) { PlaceholderScreen(title = "New sale", onBack = back()) }
-        composable(Routes.SENDING) { PlaceholderScreen(title = "Sending", onBack = back()) }
+        composable(Routes.AMOUNT) { SaleRoute(viewModel = hiltViewModel(), onDone = back()) }
+        composable(Routes.SENDING) { SendingRoute(viewModel = hiltViewModel(), onDone = back()) }
         composable(
             route = Routes.SALE,
             arguments = listOf(navArgument(Routes.SALE_REFERENCE) { type = NavType.StringType }),

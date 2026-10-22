@@ -82,7 +82,7 @@ fun ConnectionChip(connection: TerminalConnection, modifier: Modifier = Modifier
 
 /** False when the user turned animations off (animator duration scale 0) in system settings. */
 @Composable
-private fun animationsEnabled(): Boolean {
+internal fun animationsEnabled(): Boolean {
     val resolver = LocalContext.current.contentResolver
     return remember(resolver) {
         Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f

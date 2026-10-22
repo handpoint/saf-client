@@ -59,17 +59,20 @@ A switch takes about 5 to 10 seconds (SDK set-up and configuration download). St
 
 Why: only the Store and Forward API can forward stored sales and ask for their status. So when the network comes back with sales still on the terminal, the app stays on Store and Forward. Home shows "Back online · 2 sales waiting to send" with **Send now**. The send stays manual. When the run and its status follow-up have finished and nothing waits, the app switches to online by itself. A sale taken meanwhile is stored and goes in the same send or the next one.
 
-"Nothing waiting" needs the terminal's own answer to `getStoredTransactions`: the terminal can hold sales the app's list does not have. Until the terminal has answered once, the app stays on Store and Forward. So at start-up with a network, the app starts Store and Forward, checks the terminal, and then switches to online.
+"Nothing waiting" needs the terminal's own answer to `getStoredTransactions`: the terminal can hold sales the app's list does not have. Until the terminal has answered once, the app stays on Store and Forward, and asks the terminal as soon as the network is up. So at start-up with a network, the app starts Store and Forward, checks the terminal, and then switches to online. The rule starts with the app process (`SafClientApp`), not with a screen.
 
-The app never switches during a sale, a forwarding run or a status follow-up: the switch waits until the app is idle. While it switches, New sale, Charge and Send now are disabled. If the online API is not connected within 30 s, or cannot be created, the app goes back to Store and Forward and tries online again after 2 minutes.
+The app never switches during a sale, a forwarding run or a status follow-up: the switch waits until the app is idle. While it switches, New sale, Charge and Send now are disabled. If the online API is not connected within 30 s, or cannot be created, the app goes back to Store and Forward and tries online again later: after 2, then 5, then 15, then every 30 minutes, and never while the charge screen is open. When the network comes back after a drop, the waits start again from 2 minutes.
+
+After the network drops and the app goes back to Store and Forward, the network must stay up for 60 s before the app goes online again. A network that comes and goes causes one switch, not one per drop.
 
 The network counts as up when Android reports the default network with `NET_CAPABILITY_INTERNET` and `NET_CAPABILITY_VALIDATED`. The status turns offline after 3 s without such a network, and online after 5 s of stable network, so a flapping network does not make the app switch back and forth.
 
 ### What the merchant sees
 
-- A banner at the top of Home and of the sale flow: "Online" (quiet, green dot), "No connection · Sales are stored on this terminal and sent later" (amber), "Back online · {n} sales waiting to send" with Send now, or a progress banner while the app switches.
+- A banner at the top of Home and of the sale flow: "Online" (quiet, green dot), "No connection · Sales are stored on this terminal and sent later" (amber), "Back online · {n} sales waiting to send" with Send now, and a progress banner only while the app really switches. When the network is up but sales are still stored for a reason (the terminal has not answered, Handpoint is being asked about sent sales, a task runs), the banner says so without progress. "Back online" is used only after a real drop.
 - "Charge $12.50" online and "Charge offline $12.50" offline.
-- Online results say "Approved" or "Declined" with the SDK's message. Offline approvals keep "Approved offline".
+- Online results say "Approved" or "Declined" with the SDK's message (or plain words when the SDK gives only a key). Offline approvals keep "Approved offline".
+- An online sale whose outcome is unknown is kept in the list as "Check with Handpoint". Its detail says: "We couldn't confirm this sale. Check with Handpoint before charging the customer again." The app never asks for its status by itself.
 - Offline sales carry an "Offline" tag in the lists. The sale detail shows how the sale was taken.
 
 ## Prerequisites
@@ -214,9 +217,9 @@ No terminal and no network are needed. The tests use fake SDK APIs (`app/src/tes
 ## Known limitations
 
 - Sale only. There is no refund or void.
-- An online sale with an unknown outcome is not checked again: the online `getTransactionStatus` is not used. The merchant is told to check with Handpoint before charging again.
+- An online sale with an unknown outcome is not checked again: the online `getTransactionStatus` is not used. The app keeps it as UNKNOWN (an app-only status) and the merchant checks with Handpoint.
 - Online sales use the same currency as Store and Forward (`handpoint.safCurrency`).
-- While the app is online, it does not ask for the status of offline sales sent earlier. It asks again the next time it uses Store and Forward.
+- While the app is online, it does not ask for the status of offline sales sent earlier, and Refresh status waits for offline mode. It asks again the next time it uses Store and Forward.
 - No simulated mode yet. You need a real terminal to run the app.
 - If the app is killed in the middle of a sale after the card was read, that sale may not appear in the journal. It may still be stored on the terminal. Home counts it after the next reconcile and "Send now" forwards it, but the app cannot show its details.
 - Robolectric runs on Android SDK 35 (`robolectric.properties`) because it does not support SDK 36 on JDK 17.

@@ -12,6 +12,10 @@ val localProps = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
+/** A Java string literal for a BuildConfig field: quotes [value] and escapes `\` and `"`. */
+fun buildConfigString(value: String): String =
+    "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "com.handpoint.safclient"
     compileSdk = 36
@@ -23,9 +27,9 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField("String", "SHARED_SECRET", "\"${localProps.getProperty("handpoint.sharedSecret", "")}\"")
-        buildConfigField("String", "SAF_CURRENCY", "\"${localProps.getProperty("handpoint.safCurrency", "USD")}\"")
-        buildConfigField("String", "SDK_VERSION", "\"${libs.versions.handpointSdk.get()}\"")
+        buildConfigField("String", "SHARED_SECRET", buildConfigString(localProps.getProperty("handpoint.sharedSecret", "")))
+        buildConfigField("String", "SAF_CURRENCY", buildConfigString(localProps.getProperty("handpoint.safCurrency", "USD")))
+        buildConfigField("String", "SDK_VERSION", buildConfigString(libs.versions.handpointSdk.get()))
 
         // The PAX SDK ships complete native libraries for 32-bit ARM only (arm64-v8a is partial),
         // so a 64-bit terminal must run the app as 32-bit or it misses libraries at runtime.
@@ -62,6 +66,11 @@ android {
 
 kotlin {
     jvmToolchain(17)
+}
+
+ksp {
+    // Room writes the database schema here; the JSON is committed to review schema changes.
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {

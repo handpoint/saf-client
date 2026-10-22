@@ -15,6 +15,9 @@ dependencyResolutionManagement {
         maven {
             url = uri(providers.gradleProperty("MAVEN_URL").get())
             isAllowInsecureProtocol = true
+            // Ask this repository only for Handpoint artifacts; everything else comes from
+            // Google and Maven Central, never over this plain-HTTP connection.
+            content { includeGroupByRegex("com\\.handpoint.*") }
             credentials {
                 username = providers.gradleProperty("MAVEN_USER").get()
                 password = providers.gradleProperty("MAVEN_PASSWORD").get()

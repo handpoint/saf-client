@@ -1,6 +1,7 @@
 package com.handpoint.safclient.data.handpoint
 
 import com.handpoint.api.shared.Events
+import com.handpoint.api.shared.TransactionResult
 import com.handpoint.api.shared.options.SaleOptions
 import com.handpoint.api.shared.storeandforward.StoreAndForwardPaymentsApi
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
@@ -61,6 +62,9 @@ import kotlin.time.Duration.Companion.seconds
  *    `finStatus = AUTHORISED_DEFERRED`: the sale is now stored on the terminal. Every sale
  *    through this API is stored, even when the terminal has network. [cardSteps] shows the
  *    card prompts while the sale runs; [cancelSale] stops it before the card is read.
+ *    If no result comes within 180 seconds (or the caller is cancelled), this class asks the
+ *    SDK to stop the sale and returns `Failed(OUTCOME_UNKNOWN)`: the terminal may still have
+ *    stored it, so reconcile with [storedOnTerminal] before the merchant tries again.
  * 3. **Forward.** [forward] (`forwardStoredTransactions()`) sends all stored sales to Handpoint
  *    in one run. Progress arrives on [forwarding]. Only one run at a time: while a run is busy,
  *    the SDK refuses a second one. The SDK does not retry: call [forward] again for sales that
@@ -92,6 +96,10 @@ class HandpointSafTerminal(
 
     override val forwarding: SharedFlow<ForwardingEvent> = bridge.forwarding.asSharedFlow()
 
+    /**
+     * Calls `start()`. The first call to this adapter creates the SDK through `apiFactory`,
+     * which is heavy setup: call it off the main thread.
+     */
     override fun connect(): Boolean = api.start()
 
     override fun disconnect(): Boolean = api.stop()
@@ -103,21 +111,58 @@ class HandpointSafTerminal(
             SaleOptions(),
         )
         if (start.operationStarted) {
-            val result = withTimeoutOrNull(SALE_TIMEOUT) {
-                results.first { it.transactionReference == start.transactionReference }
-            }
-            result?.toOutcome(amount, clock.instant()) ?: SaleOutcome.Failed("timeout")
+            awaitSaleEnd(start.transactionReference, amount, results)
         } else {
-            // When one of its checks rejects the sale (wrong currency, invalid amount, ...), the
-            // SDK returns OperationStartResult(false) without a message and sends the reason as
-            // an endOfTransaction without a reference. Other refusals (busy, not connected)
-            // send nothing.
-            val rejection = withTimeoutOrNull(REJECTION_TIMEOUT) {
-                results.first { it.transactionReference.isBlank() }
-            }
-            rejection?.toOutcome(amount, clock.instant())
-                ?: SaleOutcome.Failed(start.errorMessage.ifBlank { "The terminal did not start the sale" })
+            rejectionOutcome(start.errorMessage, amount, results)
         }
+    }
+
+    /**
+     * Waits for the end of the started sale [reference].
+     *
+     * If no result comes in time, or the caller is cancelled, the SDK transaction is still
+     * running. Ask it to stop, so the terminal does not approve and store a sale the app has
+     * already given up on. Stopping only works before the card is read, so the result is
+     * still "outcome unknown": the caller reconciles with [storedOnTerminal].
+     */
+    private suspend fun awaitSaleEnd(
+        reference: String,
+        amount: Money,
+        results: Flow<TransactionResult>,
+    ): SaleOutcome {
+        var ended = false
+        try {
+            val result = withTimeoutOrNull(SALE_TIMEOUT) {
+                results.first { it.transactionReference == reference }
+            }
+            ended = result != null
+            return result?.toOutcome(amount, clock.instant())
+                ?: SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN)
+        } finally {
+            // Runs on timeout and on cancellation; a CancellationException still propagates.
+            if (!ended) api.stopCurrentTransaction()
+        }
+    }
+
+    /**
+     * The outcome of a sale the SDK did not start.
+     *
+     * A refusal with a message (busy, not connected, ...) fails at once. When one of its checks
+     * rejects the sale (wrong currency, invalid amount, ...), the SDK returns no message and
+     * sends the reason as an endOfTransaction without a reference, possibly just after
+     * `sale()` returns. Wait briefly for it.
+     */
+    private suspend fun rejectionOutcome(
+        startError: String,
+        amount: Money,
+        results: Flow<TransactionResult>,
+    ): SaleOutcome {
+        if (startError.isNotBlank()) return SaleOutcome.Failed(startError)
+        val rejection = withTimeoutOrNull(REJECTION_TIMEOUT) {
+            results.first { it.transactionReference.isBlank() }
+        }
+        return rejection?.toOutcome(amount, clock.instant())
+            ?: SaleOutcome.Failed("The terminal did not start the sale")
     }
 
     override fun cancelSale(): Boolean = api.stopCurrentTransaction()

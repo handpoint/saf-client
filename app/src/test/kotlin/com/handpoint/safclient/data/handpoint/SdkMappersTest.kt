@@ -23,6 +23,7 @@ import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.SALE_REFERENCE
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 import java.util.Currency
@@ -101,6 +102,18 @@ class SdkMappersTest {
         assertEquals(
             SaleOutcome.Failed("boom"),
             transactionResult(FinancialStatus.UNDEFINED, errorMessage = "boom").toOutcome(amount, now),
+        )
+    }
+
+    @Test
+    fun `failed with an unknown key is a failure, declined with an unknown key is a decline`() {
+        val failed = transactionResult(FinancialStatus.FAILED, errorMessage = "TEXT_DEFAULT_ERROR_MSG")
+            .toOutcome(amount, now)
+        assertTrue(failed is SaleOutcome.Failed)
+
+        assertEquals(
+            SaleOutcome.Declined(DeclineReason.OTHER),
+            transactionResult(FinancialStatus.DECLINED, errorMessage = "DO_NOT_HONOUR").toOutcome(amount, now),
         )
     }
 

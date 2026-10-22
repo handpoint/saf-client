@@ -11,6 +11,7 @@ import com.handpoint.api.shared.TransactionResult
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionStatus
 import com.handpoint.api.shared.storeandforward.TransactionDeletionFailed
 import com.handpoint.api.shared.storeandforward.TransactionReference
+import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.DeclineReason
 import com.handpoint.safclient.domain.model.DeleteResult
@@ -28,6 +29,9 @@ import com.handpoint.safclient.testutil.FakeSafApi.Companion.OTHER_REFERENCE
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.SALE_REFERENCE
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -40,6 +44,8 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Currency
+import kotlin.concurrent.thread
+import kotlin.time.Duration.Companion.seconds
 import com.handpoint.api.shared.Currency as SdkCurrency
 
 @OptIn(ExperimentalCoroutinesApi::class) // runCurrent, currentTime
@@ -144,6 +150,17 @@ class HandpointSafTerminalTest {
         fake.saleStart = OperationStartResult(false, errorMessage = "x")
 
         assertEquals(SaleOutcome.Failed("x"), terminal.sale(amount))
+        assertEquals(0L, testScheduler.currentTime) // a refusal with a message does not wait
+    }
+
+    @Test
+    fun `sale refused without a message or reason fails after the short rejection wait`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        fake.saleStart = OperationStartResult(false)
+
+        assertEquals(SaleOutcome.Failed("The terminal did not start the sale"), terminal.sale(amount))
+        assertEquals(2_000L, testScheduler.currentTime)
     }
 
     @Test
@@ -163,14 +180,58 @@ class HandpointSafTerminalTest {
     }
 
     @Test
-    fun `sale fails with timeout when no result arrives within 180 seconds`() = runTest {
+    fun `sale outcome is unknown and the sale is stopped when no result arrives within 180 seconds`() = runTest {
         val terminal = newTerminal()
         terminal.connect()
 
         val outcome = terminal.sale(amount)
 
-        assertEquals(SaleOutcome.Failed("timeout"), outcome)
+        assertEquals(SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN), outcome)
         assertEquals(180_000L, testScheduler.currentTime)
+        assertEquals(1, fake.calls.count { it == "stopCurrentTransaction" })
+    }
+
+    @Test
+    fun `cancelling the caller stops the sale on the terminal`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+
+        val sale = launch { terminal.sale(amount) }
+        runCurrent()
+        sale.cancel()
+        sale.join()
+
+        assertEquals(1, fake.calls.count { it == "stopCurrentTransaction" })
+    }
+
+    @Test
+    fun `a sale that ends does not stop the transaction`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        fake.duringSale = {
+            fire<Events.EndOfTransaction> { it.endOfTransaction(approvedResult(SALE_REFERENCE), DEVICE) }
+        }
+
+        terminal.sale(amount)
+
+        assertFalse(fake.calls.contains("stopCurrentTransaction"))
+    }
+
+    @Test
+    fun `sale result delivered from another thread resolves the sale`() = runBlocking {
+        val terminal = newTerminal()
+        terminal.connect()
+        fake.duringSale = {
+            // Like the SDK's executor: a separate thread, a moment after sale() returns.
+            thread {
+                Thread.sleep(50)
+                fire<Events.EndOfTransaction> { it.endOfTransaction(approvedResult(SALE_REFERENCE), DEVICE) }
+            }
+        }
+
+        val outcome = withTimeout(5.seconds) { terminal.sale(amount) }
+
+        assertTrue(outcome is SaleOutcome.ApprovedOffline)
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.handpoint.safclient.domain
 
 import com.handpoint.safclient.domain.model.CardStep
+import com.handpoint.safclient.domain.model.DeclineReason
 import com.handpoint.safclient.domain.model.DeleteResult
 import com.handpoint.safclient.domain.model.ForwardingEvent
 import com.handpoint.safclient.domain.model.Money
@@ -34,7 +35,12 @@ interface StoreAndForwardTerminal {
     /** Progress of a forwarding run started with [forward]. Hot; no replay. */
     val forwarding: SharedFlow<ForwardingEvent>
 
-    /** Starts the SDK. Returns `false` when the SDK refuses. */
+    /**
+     * Starts the SDK. Returns `false` when the SDK refuses.
+     *
+     * The first call (of this or any other member) may create the SDK, which is heavy setup:
+     * call it off the main thread.
+     */
     fun connect(): Boolean
 
     /** Stops the SDK. Returns `false` when the SDK refuses. */
@@ -44,8 +50,15 @@ interface StoreAndForwardTerminal {
      * Takes a sale and waits for its end. Every sale through this API is stored on the
      * terminal; an approval is [SaleOutcome.ApprovedOffline].
      *
-     * Returns [SaleOutcome.Failed] when the SDK does not start the sale, or with
-     * message `"timeout"` when no result arrives within 180 seconds.
+     * When the SDK does not start the sale, returns [SaleOutcome.Declined] if the SDK gave a
+     * known reason (for example [DeclineReason.CURRENCY_NOT_ACCEPTED]), else [SaleOutcome.Failed].
+     *
+     * When no result arrives within 180 seconds, or the caller is cancelled, the sale is asked
+     * to stop and `sale` returns [SaleOutcome.Failed] with message [OUTCOME_UNKNOWN] (a cancelled
+     * caller gets the cancellation).
+     * **Outcome unknown** means the terminal may still have approved and stored the sale: call
+     * [storedOnTerminal] to reconcile before the merchant tries again, or the card can be
+     * charged twice.
      */
     suspend fun sale(amount: Money): SaleOutcome
 
@@ -79,4 +92,9 @@ interface StoreAndForwardTerminal {
 
     /** Prints a receipt on the terminal printer. */
     fun printReceipt(receipt: String): Boolean
+
+    companion object {
+        /** Message of the [SaleOutcome.Failed] returned when a sale's outcome is unknown. */
+        const val OUTCOME_UNKNOWN = "Outcome unknown: no result from the terminal in time"
+    }
 }

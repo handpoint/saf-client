@@ -54,8 +54,16 @@ internal fun TransactionResult.toOutcome(amount: Money, now: Instant): SaleOutco
 
         FinancialStatus.CANCELLED -> SaleOutcome.Cancelled
 
-        // Offline declines (card limit, prepaid card, ...) arrive as FAILED.
-        FinancialStatus.FAILED, FinancialStatus.DECLINED -> SaleOutcome.Declined(declineReason())
+        // Offline declines (card limit, prepaid card, ...) arrive as FAILED with a known key.
+        // A FAILED result with any other key is an error, not a decline.
+        FinancialStatus.FAILED, FinancialStatus.DECLINED -> {
+            val reason = declineReason()
+            if (reason != DeclineReason.OTHER || finStatus == FinancialStatus.DECLINED) {
+                SaleOutcome.Declined(reason)
+            } else {
+                SaleOutcome.Failed(errorMessage.ifBlank { "The sale failed" })
+            }
+        }
 
         else -> SaleOutcome.Failed(errorMessage.ifBlank { "Unexpected result: $finStatus" })
     }

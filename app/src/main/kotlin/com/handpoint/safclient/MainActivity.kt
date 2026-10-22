@@ -7,10 +7,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.handpoint.safclient.ui.theme.SafTheme
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -20,16 +21,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             SafTheme {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Store and Forward")
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("Store and Forward", style = MaterialTheme.typography.titleLarge)
+                    }
                 }
             }
         }
     }
-}
-
-// Stub theme; replaced by ui/theme/Theme.kt.
-@Composable
-private fun SafTheme(content: @Composable () -> Unit) {
-    MaterialTheme(content = content)
 }

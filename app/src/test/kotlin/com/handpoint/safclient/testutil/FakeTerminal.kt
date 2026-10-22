@@ -45,17 +45,28 @@ class FakeTerminal : StoreAndForwardTerminal {
         private set
     var storedCalls = 0
         private set
+    var connectCalls = 0
+        private set
+
+    /** References asked about through [processingStatus], in call order. */
+    val statusRequests = mutableListOf<SaleReference>()
 
     private val forwardingEvents = MutableSharedFlow<ForwardingEvent>(extraBufferCapacity = 64)
 
-    override val connection: StateFlow<TerminalConnection> = MutableStateFlow(TerminalConnection.CONNECTED)
+    /** Current connection; set it to script what the app sees. [connect] moves it to CONNECTED. */
+    val connectionState = MutableStateFlow(TerminalConnection.CONNECTED)
+    override val connection: StateFlow<TerminalConnection> = connectionState
     override val cardSteps: Flow<CardStep> = emptyFlow()
     override val forwarding: SharedFlow<ForwardingEvent> = forwardingEvents.asSharedFlow()
 
     /** Emits one forwarding event, as the SDK would during a run. */
     suspend fun emitForwarding(event: ForwardingEvent) = forwardingEvents.emit(event)
 
-    override fun connect(): Boolean = true
+    override fun connect(): Boolean {
+        connectCalls++
+        connectionState.value = TerminalConnection.CONNECTED
+        return true
+    }
 
     override fun disconnect(): Boolean = true
 
@@ -79,7 +90,10 @@ class FakeTerminal : StoreAndForwardTerminal {
         return forwardAccepted
     }
 
-    override suspend fun processingStatus(reference: SaleReference): ProcessingStatus? = statusAnswer
+    override suspend fun processingStatus(reference: SaleReference): ProcessingStatus? {
+        statusRequests += reference
+        return statusAnswer
+    }
 
     override suspend fun delete(reference: SaleReference): DeleteResult = deleteResult
 

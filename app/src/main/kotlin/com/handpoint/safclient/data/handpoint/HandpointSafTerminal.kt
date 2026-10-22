@@ -14,17 +14,12 @@ import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.model.TerminalConnection
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.math.BigInteger
 import java.time.Clock
@@ -77,19 +72,48 @@ import kotlin.time.Duration.Companion.seconds
  *
  * [delete] removes a stored sale from the terminal before it is forwarded.
  *
- * @param apiFactory creates the SDK API with the given delegate. Called once, on first use.
+ * ## Switching to the online API and back
+ *
+ * The SDK runs either this API or the online `Hapi`, never both (see
+ * [com.handpoint.safclient.domain.PaymentTerminal]): creating the online API reconfigures the
+ * SDK and drops this API's event listeners. So [deactivate] calls `stop()` and forgets the API;
+ * from then on every member fails at once instead of creating the SDK again behind the online
+ * API's back. [activate] creates the API again with `apiFactory`, registers the delegate again
+ * and calls `start()`. Store and Forward starts without network when the terminal has
+ * downloaded its configuration before: it uses the cached one.
+ *
+ * @param apiFactory creates the SDK API with the given delegate. Called on first use, and again
+ *   on each [activate] after a [deactivate].
  * @param clock gives the approval time of a sale.
  */
 class HandpointSafTerminal(
-    apiFactory: (Events.SmartposRequired) -> StoreAndForwardPaymentsApi,
+    private val apiFactory: (Events.SmartposRequired) -> StoreAndForwardPaymentsApi,
     private val clock: Clock,
 ) : StoreAndForwardTerminal {
 
     private val bridge = SdkEventBridge()
 
-    private val api: StoreAndForwardPaymentsApi by lazy {
-        apiFactory(bridge).also { it.registerEventsDelegate(bridge) }
+    private val lock = Any()
+
+    /** The SDK API; `null` before its first use and while deactivated. */
+    @Volatile
+    private var current: StoreAndForwardPaymentsApi? = null
+
+    /** `true` from [deactivate] until [activate]: then no member may create the SDK API. */
+    @Volatile
+    private var deactivated = false
+
+    /** The SDK API, created on first use. `null` while deactivated. */
+    private fun api(): StoreAndForwardPaymentsApi? = current ?: synchronized(lock) {
+        current ?: if (deactivated) null else create()
     }
+
+    /** Creates the SDK API and registers the delegate: that registration receives the events. */
+    private fun create(): StoreAndForwardPaymentsApi =
+        apiFactory(bridge).also {
+            it.registerEventsDelegate(bridge)
+            current = it
+        }
 
     override val connection: StateFlow<TerminalConnection> = bridge.connection.asStateFlow()
 
@@ -111,6 +135,7 @@ class HandpointSafTerminal(
      * and does not block the second caller's thread.
      */
     override fun connect(): Boolean {
+        val api = api() ?: return false
         if (!starting.compareAndSet(false, true)) return true
         try {
             return api.start()
@@ -119,20 +144,49 @@ class HandpointSafTerminal(
         }
     }
 
-    override fun disconnect(): Boolean = api.stop()
+    override fun disconnect(): Boolean = api()?.stop() ?: false
 
-    override suspend fun sale(amount: Money): SaleOutcome = listenTo(bridge.transactionResults) { results ->
-        val start = api.sale(
-            BigInteger.valueOf(amount.minorUnits),
-            amount.currency.toSdkCurrency(),
-            SaleOptions(),
-        )
-        if (start.operationStarted) {
-            awaitSaleEnd(start.transactionReference, amount, results)
-        } else {
-            rejectionOutcome(start.errorMessage, amount, results)
+    /** Creates the SDK API again if it was deactivated (or never created), then calls `start()`. */
+    override fun activate(): Boolean {
+        synchronized(lock) {
+            if (current == null) {
+                deactivated = false
+                bridge.connection.value = TerminalConnection.DISCONNECTED
+                create()
+            }
         }
+        return connect()
     }
+
+    /** Calls `stop()` and forgets the SDK API, so the online API can be created. */
+    override fun deactivate(): Boolean {
+        val api = synchronized(lock) {
+            deactivated = true
+            current.also { current = null }
+        } ?: return true
+        val stopped = api.stop()
+        bridge.connection.value = TerminalConnection.DISCONNECTED
+        return stopped
+    }
+
+    override suspend fun sale(amount: Money): SaleOutcome {
+        val api = api() ?: return SaleOutcome.Failed(NOT_ACTIVE)
+        return sale(api, amount)
+    }
+
+    private suspend fun sale(api: StoreAndForwardPaymentsApi, amount: Money): SaleOutcome =
+        listenTo(bridge.transactionResults) { results ->
+            val start = api.sale(
+                BigInteger.valueOf(amount.minorUnits),
+                amount.currency.toSdkCurrency(),
+                SaleOptions(),
+            )
+            if (start.operationStarted) {
+                awaitSaleEnd(api, start.transactionReference, amount, results)
+            } else {
+                rejectionOutcome(start.errorMessage, amount, results)
+            }
+        }
 
     /**
      * Waits for the end of the started sale [reference].
@@ -143,6 +197,7 @@ class HandpointSafTerminal(
      * still "outcome unknown": the caller reconciles with [storedOnTerminal].
      */
     private suspend fun awaitSaleEnd(
+        api: StoreAndForwardPaymentsApi,
         reference: String,
         amount: Money,
         results: Flow<TransactionResult>,
@@ -182,16 +237,20 @@ class HandpointSafTerminal(
             ?: SaleOutcome.Failed("The terminal did not start the sale")
     }
 
-    override fun cancelSale(): Boolean = api.stopCurrentTransaction()
+    override fun cancelSale(): Boolean = api()?.stopCurrentTransaction() ?: false
 
-    override suspend fun storedOnTerminal(): StoredSummary? = listenTo(bridge.storedSummaries) { summaries ->
-        if (!api.getStoredTransactions()) return@listenTo null
-        withTimeoutOrNull(STORED_LIST_TIMEOUT) { summaries.first() }
+    override suspend fun storedOnTerminal(): StoredSummary? {
+        val api = api() ?: return null
+        return listenTo(bridge.storedSummaries) { summaries ->
+            if (!api.getStoredTransactions()) return@listenTo null
+            withTimeoutOrNull(STORED_LIST_TIMEOUT) { summaries.first() }
+        }
     }
 
-    override fun forward(): Boolean = api.forwardStoredTransactions()
+    override fun forward(): Boolean = api()?.forwardStoredTransactions() ?: false
 
     override suspend fun processingStatus(reference: SaleReference): ProcessingStatus? {
+        val api = api() ?: return null
         val sdkReference = reference.toTransactionReferenceOrNull() ?: return null
         return listenTo(bridge.statusReplies) { replies ->
             if (!api.getTransactionProcessingStatus(sdkReference)) return@listenTo null
@@ -204,6 +263,7 @@ class HandpointSafTerminal(
     }
 
     override suspend fun delete(reference: SaleReference): DeleteResult {
+        val api = api() ?: return DeleteResult.ERROR
         val sdkReference = reference.toTransactionReferenceOrNull() ?: return DeleteResult.ERROR
         return listenTo(bridge.deletions) { deletions ->
             if (!api.deleteStoredTransaction(sdkReference)) return@listenTo DeleteResult.ERROR
@@ -214,28 +274,7 @@ class HandpointSafTerminal(
         }
     }
 
-    override fun printReceipt(receipt: String): Boolean = api.printReceipt(receipt)
-
-    /**
-     * Subscribes to [events] now, then runs [block] with everything received from this moment.
-     *
-     * Call the SDK inside [block]. A callback that the SDK delivers on another thread while the
-     * SDK call is still running is kept in a buffer, so [block] cannot miss it. The subscription
-     * ends when [block] returns or is cancelled.
-     */
-    private suspend fun <E, R> listenTo(events: Flow<E>, block: suspend (received: Flow<E>) -> R): R =
-        coroutineScope {
-            val received = Channel<E>(Channel.UNLIMITED)
-            // UNDISPATCHED: the collector subscribes before launch() returns, not later.
-            val listener = launch(start = CoroutineStart.UNDISPATCHED) {
-                events.collect { received.send(it) }
-            }
-            try {
-                block(received.receiveAsFlow())
-            } finally {
-                listener.cancel()
-            }
-        }
+    override fun printReceipt(receipt: String): Boolean = api()?.printReceipt(receipt) ?: false
 
     private companion object {
         /** A sale includes the cardholder: presenting the card, entering the PIN. */
@@ -247,5 +286,8 @@ class HandpointSafTerminal(
         val STORED_LIST_TIMEOUT: Duration = 15.seconds
         val STATUS_TIMEOUT: Duration = 20.seconds
         val DELETE_TIMEOUT: Duration = 15.seconds
+
+        /** Message of a sale asked for while the online API is active. */
+        const val NOT_ACTIVE = "Store and Forward is not active"
     }
 }

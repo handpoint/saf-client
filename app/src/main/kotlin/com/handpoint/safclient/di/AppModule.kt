@@ -10,6 +10,7 @@ import com.handpoint.api.HandpointCredentials
 import com.handpoint.api.HapiFactory
 import com.handpoint.api.Settings
 import com.handpoint.safclient.BuildConfig
+import com.handpoint.safclient.data.handpoint.HandpointOnlineTerminal
 import com.handpoint.safclient.data.handpoint.HandpointSafTerminal
 import com.handpoint.safclient.data.journal.RoomSalesJournal
 import com.handpoint.safclient.data.journal.SafDatabase
@@ -21,6 +22,7 @@ import com.handpoint.safclient.domain.AppPreferences
 import com.handpoint.safclient.domain.ErrorReporter
 import com.handpoint.safclient.domain.ApplicationScope
 import com.handpoint.safclient.domain.NetworkMonitor
+import com.handpoint.safclient.domain.OnlineTerminal
 import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import dagger.Module
@@ -53,6 +55,23 @@ object AppModule {
                 delegate,
                 HandpointCredentials(BuildConfig.SHARED_SECRET),
                 Settings(),
+            )
+        },
+        clock = clock,
+    )
+
+    /**
+     * The online API. Created only when the app switches to online sales: creating it replaces
+     * the Store and Forward API in the SDK (see `PaymentTerminal`).
+     */
+    @Provides
+    @Singleton
+    fun provideOnlineTerminal(clock: Clock): OnlineTerminal = HandpointOnlineTerminal(
+        apiFactory = { delegate ->
+            HapiFactory.getAsyncInterface(
+                delegate,
+                credentials = HandpointCredentials(BuildConfig.SHARED_SECRET),
+                settings = Settings(),
             )
         },
         clock = clock,

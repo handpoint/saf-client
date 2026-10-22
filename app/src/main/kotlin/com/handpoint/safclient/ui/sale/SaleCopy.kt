@@ -1,5 +1,6 @@
 package com.handpoint.safclient.ui.sale
 
+import com.handpoint.safclient.domain.OnlineTerminal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.DeclineReason
@@ -21,8 +22,8 @@ enum class ResultKind { APPROVED, DECLINED, UNKNOWN }
  * Merchant-facing copy for a sale outcome. [currency] is the SAF currency from settings, the one
  * the sale was taken in; it is named when the terminal refuses it.
  *
- * An unknown outcome offers no Try again: the terminal may already hold the sale, and a second
- * charge could take the money twice.
+ * An unknown outcome offers no Try again: the terminal may already hold the sale (offline), or
+ * the card may already be charged (online), and a second charge could take the money twice.
  */
 fun resultCopy(outcome: SaleOutcome, currency: Currency): ResultCopy = when (outcome) {
     is SaleOutcome.ApprovedOffline -> ResultCopy(
@@ -32,6 +33,20 @@ fun resultCopy(outcome: SaleOutcome, currency: Currency): ResultCopy = when (out
         canPrint = true,
         canTryAgain = false,
     )
+    is SaleOutcome.ApprovedOnline -> ResultCopy(
+        kind = ResultKind.APPROVED,
+        title = "Approved",
+        body = "The card has been charged.",
+        canPrint = true,
+        canTryAgain = false,
+    )
+    is SaleOutcome.DeclinedOnline -> ResultCopy(
+        kind = ResultKind.DECLINED,
+        title = "Declined",
+        body = outcome.message,
+        canPrint = false,
+        canTryAgain = true,
+    )
     is SaleOutcome.Declined -> ResultCopy(
         kind = ResultKind.DECLINED,
         title = "Sale declined",
@@ -39,16 +54,22 @@ fun resultCopy(outcome: SaleOutcome, currency: Currency): ResultCopy = when (out
         canPrint = false,
         canTryAgain = true,
     )
-    is SaleOutcome.Failed -> if (outcome.message == StoreAndForwardTerminal.OUTCOME_UNKNOWN) {
-        ResultCopy(
+    is SaleOutcome.Failed -> when (outcome.message) {
+        StoreAndForwardTerminal.OUTCOME_UNKNOWN -> ResultCopy(
             kind = ResultKind.UNKNOWN,
             title = "Couldn't confirm the sale",
             body = "Check Home before charging again — the sale may already be stored on this terminal.",
             canPrint = false,
             canTryAgain = false,
         )
-    } else {
-        ResultCopy(
+        OnlineTerminal.OUTCOME_UNKNOWN -> ResultCopy(
+            kind = ResultKind.UNKNOWN,
+            title = "Couldn't confirm the sale",
+            body = "The card may have been charged. Check the transaction with Handpoint before charging again.",
+            canPrint = false,
+            canTryAgain = false,
+        )
+        else -> ResultCopy(
             kind = ResultKind.DECLINED,
             title = "Sale not completed",
             body = "The sale couldn't be completed.",
@@ -60,7 +81,7 @@ fun resultCopy(outcome: SaleOutcome, currency: Currency): ResultCopy = when (out
     SaleOutcome.Cancelled -> ResultCopy(
         kind = ResultKind.DECLINED,
         title = "Sale cancelled",
-        body = "No sale was stored.",
+        body = "The card was not charged.",
         canPrint = false,
         canTryAgain = true,
     )

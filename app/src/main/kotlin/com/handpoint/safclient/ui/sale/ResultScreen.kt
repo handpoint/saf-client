@@ -40,6 +40,7 @@ import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.domain.model.approvedSale
 import com.handpoint.safclient.ui.components.AmountText
 import com.handpoint.safclient.ui.components.ButtonEmphasis
 import com.handpoint.safclient.ui.components.PrimaryButton
@@ -65,7 +66,7 @@ fun ResultContent(
     modifier: Modifier = Modifier,
 ) {
     val copy = resultCopy(outcome, amount.currency)
-    val sale = (outcome as? SaleOutcome.ApprovedOffline)?.sale
+    val sale = outcome.approvedSale
     Column(
         modifier = modifier
             .fillMaxSize()

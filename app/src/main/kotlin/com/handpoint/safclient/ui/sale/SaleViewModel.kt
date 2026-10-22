@@ -10,6 +10,7 @@ import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.TerminalConnection
+import com.handpoint.safclient.domain.model.approvedSale
 import com.handpoint.safclient.domain.usecase.TakeSale
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -173,12 +174,12 @@ class SaleViewModel @Inject constructor(
 
     /** Prints the customer receipt of the approved sale (or the merchant one when there is none). */
     fun printReceipt() {
-        val outcome = (_state.value as? ChargeUiState.Result)?.outcome as? SaleOutcome.ApprovedOffline ?: return
+        val sale = (_state.value as? ChargeUiState.Result)?.outcome?.approvedSale ?: return
         if (_printing.value) return
         _printing.value = true
         viewModelScope.launch {
-            val receipt = outcome.sale.customerReceipt?.takeIf { it.isNotBlank() }
-                ?: outcome.sale.merchantReceipt?.takeIf { it.isNotBlank() }
+            val receipt = sale.customerReceipt?.takeIf { it.isNotBlank() }
+                ?: sale.merchantReceipt?.takeIf { it.isNotBlank() }
             val printed = try {
                 receipt != null && withContext(io) { terminal.printReceipt(receipt) }
             } catch (e: CancellationException) {

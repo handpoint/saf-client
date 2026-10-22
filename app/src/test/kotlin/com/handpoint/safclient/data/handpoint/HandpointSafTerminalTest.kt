@@ -105,6 +105,59 @@ class HandpointSafTerminalTest {
     }
 
     @Test
+    fun `activate after deactivate creates the SDK again and registers again`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+
+        assertTrue(terminal.deactivate())
+        assertTrue(terminal.activate())
+
+        assertEquals(2, factoryCalls)
+        assertEquals(listOf("registerEventsDelegate", "start", "stop", "registerEventsDelegate", "start"), fake.calls)
+    }
+
+    @Test
+    fun `activate creates the SDK when it was never created`() = runTest {
+        val terminal = newTerminal()
+
+        assertTrue(terminal.activate())
+
+        assertEquals(1, factoryCalls)
+        assertEquals(listOf("registerEventsDelegate", "start"), fake.calls)
+    }
+
+    @Test
+    fun `a deactivated terminal never creates the SDK by itself`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        terminal.deactivate()
+        val callsBefore = fake.calls.toList()
+
+        assertFalse(terminal.connect())
+        assertFalse(terminal.forward())
+        assertNull(terminal.storedOnTerminal())
+        assertNull(terminal.processingStatus(SaleReference(SALE_REFERENCE)))
+        assertEquals(DeleteResult.ERROR, terminal.delete(SaleReference(SALE_REFERENCE)))
+        assertTrue(terminal.sale(amount) is SaleOutcome.Failed)
+        assertFalse(terminal.cancelSale())
+
+        assertEquals(1, factoryCalls)
+        assertEquals(callsBefore, fake.calls)
+        assertEquals(0L, testScheduler.currentTime) // nothing waited for an answer
+    }
+
+    @Test
+    fun `deactivate resets the connection`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        fake.fire<Events.ConnectionStatusChanged> { it.connectionStatusChanged(ConnectionStatus.Connected, DEVICE) }
+
+        terminal.deactivate()
+
+        assertEquals(TerminalConnection.DISCONNECTED, terminal.connection.value)
+    }
+
+    @Test
     fun `connection follows the SDK connection status`() = runTest {
         val terminal = newTerminal()
         terminal.connect()

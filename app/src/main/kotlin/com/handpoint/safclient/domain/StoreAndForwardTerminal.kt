@@ -1,6 +1,5 @@
 package com.handpoint.safclient.domain
 
-import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.DeclineReason
 import com.handpoint.safclient.domain.model.DeleteResult
 import com.handpoint.safclient.domain.model.ForwardingEvent
@@ -9,28 +8,22 @@ import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.StoredSummary
-import com.handpoint.safclient.domain.model.TerminalConnection
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
 
 /**
- * The payment terminal, as the rest of the app sees it: Store and Forward only.
+ * The terminal's Store and Forward API, as the rest of the app sees it.
  *
- * This port hides the Handpoint SDK. Its callbacks become [Flow]s and its
+ * It cannot run at the same time as [OnlineTerminal]; see [PaymentTerminal]. Only this API can
+ * send stored sales ([forward]) and ask for their status ([processingStatus]).
+ *
+ * This port hides the Handpoint SDK. Its callbacks become flows and its
  * request/callback pairs become `suspend` functions that always finish: they return a
  * result, or a defined failure value on timeout. They never hang.
  *
  * The production implementation is
  * [com.handpoint.safclient.data.handpoint.HandpointSafTerminal].
  */
-interface StoreAndForwardTerminal {
-
-    /** Current connection to the terminal's payment service. */
-    val connection: StateFlow<TerminalConnection>
-
-    /** Card prompts during a sale ("Present card", "Enter PIN", ...). Hot; no replay. */
-    val cardSteps: Flow<CardStep>
+interface StoreAndForwardTerminal : PaymentTerminal {
 
     /** Progress of a forwarding run started with [forward]. Hot; no replay. */
     val forwarding: SharedFlow<ForwardingEvent>
@@ -39,12 +32,12 @@ interface StoreAndForwardTerminal {
      * Starts the SDK. Returns `false` when the SDK refuses.
      *
      * The first call (of this or any other member) may create the SDK, which is heavy setup:
-     * call it off the main thread.
+     * call it off the main thread. After [deactivate], only [activate] creates it again.
      */
-    fun connect(): Boolean
+    override fun connect(): Boolean
 
     /** Stops the SDK. Returns `false` when the SDK refuses. */
-    fun disconnect(): Boolean
+    override fun disconnect(): Boolean
 
     /**
      * Takes a sale and waits for its end. Every sale through this API is stored on the
@@ -61,9 +54,6 @@ interface StoreAndForwardTerminal {
      * charged twice.
      */
     suspend fun sale(amount: Money): SaleOutcome
-
-    /** Asks the SDK to stop the current sale. Only works before the card is read. */
-    fun cancelSale(): Boolean
 
     /**
      * Sales still stored on the terminal (not yet forwarded) and their total.
@@ -89,9 +79,6 @@ interface StoreAndForwardTerminal {
      * Returns [DeleteResult.ERROR] when the SDK refuses or does not answer within 15 seconds.
      */
     suspend fun delete(reference: SaleReference): DeleteResult
-
-    /** Prints a receipt on the terminal printer. */
-    fun printReceipt(receipt: String): Boolean
 
     companion object {
         /** Message of the [SaleOutcome.Failed] returned when a sale's outcome is unknown. */

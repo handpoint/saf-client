@@ -102,6 +102,30 @@ class FakeTerminal : StoreAndForwardTerminal {
         return true
     }
 
+    var activateCalls = 0
+        private set
+    var deactivateCalls = 0
+        private set
+
+    /** Thrown by [activate] when set, as when the SDK cannot be created. */
+    var activateError: Exception? = null
+
+    /** When `false`, [activate] leaves the connection as it is: a terminal that does not come up. */
+    var connectsOnActivate: Boolean = true
+
+    override fun activate(): Boolean {
+        activateCalls++
+        activateError?.let { throw it }
+        if (connectsOnActivate) connectionState.value = TerminalConnection.CONNECTED
+        return true
+    }
+
+    override fun deactivate(): Boolean {
+        deactivateCalls++
+        connectionState.value = TerminalConnection.DISCONNECTED
+        return true
+    }
+
     var disconnectCalls = 0
         private set
 

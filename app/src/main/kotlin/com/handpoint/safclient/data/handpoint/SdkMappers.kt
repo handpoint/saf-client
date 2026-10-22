@@ -9,6 +9,7 @@ import com.handpoint.api.shared.TransactionResult
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionErrorReason
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionStatus
 import com.handpoint.api.shared.storeandforward.TransactionReference
+import com.handpoint.safclient.domain.OnlineTerminal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.DeclineReason
@@ -18,6 +19,7 @@ import com.handpoint.safclient.domain.model.ForwardingResult
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.TerminalConnection
@@ -70,6 +72,38 @@ internal fun TransactionResult.toOutcome(amount: Money, now: Instant): SaleOutco
         // expects: the terminal may still have stored the sale, so treat the outcome as unknown
         // and let the caller reconcile before the merchant charges again.
         else -> SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN)
+    }
+
+/**
+ * Turns the SDK's end of an online transaction into a sale outcome.
+ *
+ * Only AUTHORISED is an approval: the card has been charged, so the sale is recorded as
+ * SUCCEEDED, with nothing left to send. A result this flow does not expect (for example a
+ * partial approval) is an unknown outcome: the card may have been charged, so the merchant must
+ * not simply charge again.
+ */
+internal fun TransactionResult.toOnlineOutcome(amount: Money, now: Instant): SaleOutcome =
+    when (finStatus) {
+        FinancialStatus.AUTHORISED -> SaleOutcome.ApprovedOnline(
+            Sale(
+                reference = SaleReference(transactionReference),
+                amount = amount,
+                maskedCard = maskedCardNumber.toMaskedCard(),
+                entryMode = toEntryMode(),
+                approvedAt = now,
+                sentAt = null,
+                status = ProcessingStatus.SUCCEEDED,
+                statusCheckedAt = now,
+                merchantReceipt = merchantReceipt.ifBlank { null },
+                customerReceipt = customerReceipt.ifBlank { null },
+                channel = SaleChannel.ONLINE,
+            ),
+        )
+
+        FinancialStatus.DECLINED -> SaleOutcome.DeclinedOnline(errorMessage.ifBlank { "Declined" })
+        FinancialStatus.CANCELLED -> SaleOutcome.Cancelled
+        FinancialStatus.FAILED -> SaleOutcome.Failed(errorMessage.ifBlank { "The sale failed" })
+        else -> SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN)
     }
 
 /**

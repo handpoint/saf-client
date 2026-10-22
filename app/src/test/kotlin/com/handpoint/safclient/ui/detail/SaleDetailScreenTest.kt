@@ -9,15 +9,16 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.handpoint.safclient.domain.model.ProcessingStatus
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.ui.theme.SafTheme
+import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.GraphicsMode
-import java.time.Instant
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -108,5 +109,25 @@ class SaleDetailScreenTest {
         compose.onNodeWithText("Refresh status").assertDoesNotExist()
         compose.onNodeWithText("Back").performClick()
         assertEquals(1, backs)
+    }
+
+    @Test
+    fun anOnlineSaleShowsItsChannelAndCannotBeRefreshed() {
+        val online = sale("7c1e2b1a-5d4f-4a2e-9b7d-3f0c8e6da91f", ProcessingStatus.SUCCEEDED)
+            .copy(channel = SaleChannel.ONLINE, statusCheckedAt = java.time.Instant.parse("2026-10-22T10:00:00Z"))
+        show(SaleDetailUiState(sale = online, isLoading = false))
+
+        compose.onNodeWithText("Approved online", substring = true).assertExists()
+        compose.onNodeWithText("Sent to Handpoint", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Online").assertExists()
+        compose.onNodeWithText("Refresh status").assertDoesNotExist()
+    }
+
+    @Test
+    fun anOfflineSaleShowsItsChannel() {
+        show(stateFor(ProcessingStatus.STORED))
+
+        compose.onNodeWithText("Approved offline", substring = true).assertExists()
+        compose.onNodeWithText("Offline").assertExists()
     }
 }

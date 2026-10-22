@@ -58,13 +58,18 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.handpoint.safclient.R
 import com.handpoint.safclient.domain.model.EntryMode
+import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.NetworkStatus
+import com.handpoint.safclient.domain.model.PaymentMode
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.ui.components.AmountText
 import com.handpoint.safclient.ui.components.ConnectionChip
+import com.handpoint.safclient.ui.components.ConnectivityBanner
 import com.handpoint.safclient.ui.components.EmptyState
 import com.handpoint.safclient.ui.components.PrimaryButton
 import com.handpoint.safclient.ui.components.SaleRow
@@ -131,21 +136,31 @@ fun HomeScreen(
         modifier = modifier,
         containerColor = background,
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(state.merchantName, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                },
-                actions = {
-                    ConnectionStatus(state.connection, onRetryConnection)
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = background,
-                    scrolledContainerColor = background,
-                ),
-            )
+            Column(Modifier.background(background)) {
+                TopAppBar(
+                    title = {
+                        Text(state.merchantName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    },
+                    actions = {
+                        ConnectionStatus(state.connection, onRetryConnection)
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = background,
+                        scrolledContainerColor = background,
+                    ),
+                )
+                // Outside the list, so it stays in view while the list scrolls.
+                ConnectivityBanner(
+                    state = state.mode,
+                    waitingToSend = state.pendingCount,
+                    onSendNow = onSendNow,
+                    sendEnabled = state.canSend,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+                )
+            }
         },
     ) { padding ->
         val direction = LocalLayoutDirection.current
@@ -173,7 +188,17 @@ fun HomeScreen(
                     if (state.notInList > 0) NotInList(state.notInList)
                 }
             }
-            item(key = "new-sale") { NewSale(state.canTakeSale, onNewSale) }
+            item(key = "new-sale") {
+                NewSale(
+                    enabled = state.canTakeSale,
+                    hint = if (state.mode.isSwitching) {
+                        "Getting ready. New sale is back in a moment."
+                    } else {
+                        "Connect the terminal to take sales"
+                    },
+                    onNewSale = onNewSale,
+                )
+            }
             item(key = "header") {
                 ListHeader(filter = filter, storedCount = state.stored.size, onFilter = { filter = it })
             }
@@ -315,14 +340,17 @@ private fun CardButton(
     }
 }
 
-/** New sale, which needs a connected terminal; says why when it is not available. */
+/**
+ * New sale, which needs a connected terminal and no switch between online and offline sales;
+ * [hint] says why when it is not available.
+ */
 @Composable
-private fun NewSale(enabled: Boolean, onNewSale: () -> Unit) {
+private fun NewSale(enabled: Boolean, hint: String, onNewSale: () -> Unit) {
     Column(Modifier.padding(top = 12.dp)) {
         PrimaryButton(text = "New sale", onClick = onNewSale, enabled = enabled, emphasis = ButtonEmphasis.Accent)
         if (!enabled) {
             Text(
-                text = "Connect the terminal to take sales",
+                text = hint,
                 style = MaterialTheme.typography.bodyMedium,
                 color = SafTheme.colors.textMuted,
                 textAlign = TextAlign.Center,
@@ -422,7 +450,13 @@ private fun HomeScreenPreview() = SafTheme {
 @Composable
 private fun HomeScreenOfflinePreview() = SafTheme {
     HomeScreen(
-        previewState().copy(connection = TerminalConnection.DISCONNECTED, pending = null, pendingCount = 0, stored = emptyList()),
+        previewState().copy(
+            connection = TerminalConnection.DISCONNECTED,
+            pending = null,
+            pendingCount = 0,
+            stored = emptyList(),
+            mode = ModeState(network = NetworkStatus.OFFLINE),
+        ),
         onNewSale = {},
         onSendNow = {},
         onOpenSale = {},
@@ -448,7 +482,8 @@ private fun previewState(): HomeUiState {
     val today = listOf(
         sale("a", 1250, "•••• 4242", ProcessingStatus.STORED, "2026-10-22T10:14:00Z"),
         sale("b", 4700, "•••• 1188", ProcessingStatus.STORED, "2026-10-22T09:52:00Z"),
-        sale("c", 820, "•••• 0071", ProcessingStatus.SUCCEEDED, "2026-10-22T08:30:00Z"),
+        sale("c", 820, "•••• 0071", ProcessingStatus.SUCCEEDED, "2026-10-22T08:30:00Z")
+            .copy(channel = SaleChannel.ONLINE),
     )
     val stored = today.filter { it.status == ProcessingStatus.STORED }
     return HomeUiState(
@@ -459,5 +494,6 @@ private fun previewState(): HomeUiState {
         today = today,
         stored = stored,
         isLoading = false,
+        mode = ModeState(mode = PaymentMode.OFFLINE, network = NetworkStatus.ONLINE),
     )
 }

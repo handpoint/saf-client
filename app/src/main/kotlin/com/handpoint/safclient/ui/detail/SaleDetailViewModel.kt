@@ -8,6 +8,7 @@ import com.handpoint.safclient.domain.ErrorReporter
 import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.model.DeleteResult
 import com.handpoint.safclient.domain.model.ProcessingStatus
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.reportingErrors
@@ -40,6 +41,12 @@ data class SaleDetailUiState(
     val isLoading: Boolean = true,
     val deleting: Boolean = false,
 ) {
+    /**
+     * Only an offline sale has a status to ask Handpoint for: an online sale was settled when
+     * it was approved.
+     */
+    val canRefresh: Boolean get() = sale?.channel == SaleChannel.OFFLINE
+
     /** The journal has no sale with this reference. */
     val notFound: Boolean get() = !isLoading && sale == null && !deleting
 }
@@ -84,7 +91,7 @@ class SaleDetailViewModel @Inject constructor(
 
     /** Asks Handpoint for the sale's status. A tap while a refresh runs is ignored. */
     fun refreshStatus() {
-        if (refreshing.value) return
+        if (refreshing.value || !uiState.value.canRefresh) return
         refreshing.value = true
         viewModelScope.launch {
             try {

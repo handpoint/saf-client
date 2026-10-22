@@ -1,31 +1,45 @@
 package com.handpoint.safclient.ui.home
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
+import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.NetworkStatus
+import com.handpoint.safclient.domain.model.PaymentMode
 import com.handpoint.safclient.domain.model.ProcessingStatus
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
+import com.handpoint.safclient.ui.components.CONNECTIVITY_BANNER_TAG
 import com.handpoint.safclient.ui.theme.SafTheme
-import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+// A PAX A920-sized screen: the default Robolectric screen (320 x 470 dp) is smaller than any
+// terminal, and the connectivity banner would push the list rows out of view.
+@Config(qualifiers = "w360dp-h640dp")
 class HomeScreenTest {
     @get:Rule
     val compose = createComposeRule()
@@ -158,5 +172,52 @@ class HomeScreenTest {
         show(waiting)
         compose.onNodeWithText("Connected").assertHasNoClickAction().performClick()
         assertEquals(0, retryClicks)
+    }
+
+    // --- online and offline ----------------------------------------------------------------------
+
+    private val online = ModeState(mode = PaymentMode.ONLINE, network = NetworkStatus.ONLINE)
+
+    @Test
+    fun theBannerSaysOnline() {
+        show(waiting.copy(pendingCount = 0, pending = null, stored = emptyList(), mode = online))
+        compose.onNodeWithText("Online").assertExists()
+    }
+
+    @Test
+    fun theBannerSaysWhenThereIsNoConnection() {
+        show(waiting.copy(mode = ModeState(network = NetworkStatus.OFFLINE)))
+        compose.onNodeWithText("No connection · Sales are stored on this terminal and sent later").assertExists()
+    }
+
+    @Test
+    fun backOnlineWithSalesWaitingOffersSendNowInTheBanner() {
+        show(waiting.copy(pendingCount = 2, mode = ModeState(network = NetworkStatus.ONLINE)))
+        compose.onNodeWithText("Back online · 2 sales waiting to send").assertExists()
+        compose.onNode(hasText("Send now") and hasAnyAncestor(hasTestTag(CONNECTIVITY_BANNER_TAG))).performClick()
+        assertEquals(1, sendClicks)
+    }
+
+    @Test
+    fun newSaleIsDisabledWhileSwitching() {
+        val switching = online.copy(mode = PaymentMode.OFFLINE, switchingTo = PaymentMode.ONLINE)
+        show(waiting.copy(pendingCount = 0, pending = null, stored = emptyList(), mode = switching))
+        compose.onNodeWithText("Back online · getting ready…").assertExists()
+        compose.onNodeWithText("New sale").assertIsNotEnabled()
+        compose.onNodeWithText("Getting ready. New sale is back in a moment.").assertExists()
+    }
+
+    @Test
+    fun sendNowIsDisabledWhileSwitching() {
+        show(waiting.copy(mode = ModeState(network = NetworkStatus.OFFLINE, switchingTo = PaymentMode.OFFLINE)))
+        compose.onNodeWithText("Send now").assertIsNotEnabled()
+    }
+
+    @Test
+    fun offlineSalesCarryAnOfflineTag() {
+        val online = sale("on", ProcessingStatus.SUCCEEDED).copy(channel = SaleChannel.ONLINE)
+        show(waiting.copy(today = listOf(online, succeededToday)))
+        // A row reads out as one sentence; the offline one says so.
+        compose.onAllNodesWithContentDescription(", offline,", substring = true).assertCountEquals(1)
     }
 }

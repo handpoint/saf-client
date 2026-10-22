@@ -1,6 +1,7 @@
 package com.handpoint.safclient.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,7 +28,9 @@ import com.handpoint.safclient.domain.model.EntryMode
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.ui.theme.PillShape
 import com.handpoint.safclient.ui.theme.SafPreviewSurface
 import com.handpoint.safclient.ui.theme.SafPreviews
 import com.handpoint.safclient.ui.theme.SafTheme
@@ -42,7 +45,8 @@ private val TimeFormat: DateTimeFormatter = DateTimeFormatter.ofLocalizedTime(Fo
 
 /**
  * One sale in a list: amount, masked card ("Card" when unknown) and local time (short, locale format) on the left,
- * status on the right. Read out as a single sentence by screen readers.
+ * status on the right. A sale taken offline (Store and Forward) carries an "Offline" tag. Read out as a single
+ * sentence by screen readers.
  */
 @Composable
 fun SaleRow(
@@ -55,13 +59,15 @@ fun SaleRow(
     val card = sale.maskedCard ?: "Card"
     val time = TimeFormat.format(sale.approvedAt.atZone(zone))
     val status = sale.status.label()
+    val offline = sale.channel == SaleChannel.OFFLINE
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
             .clickable(onClick = onClick)
             .clearAndSetSemantics {
-                contentDescription = "$amount, $card, $time, $status"
+                contentDescription = listOfNotNull(amount, card, time, "offline".takeIf { offline }, status)
+                    .joinToString(", ")
                 role = Role.Button
                 onClick { onClick(); true }
             }
@@ -70,16 +76,36 @@ fun SaleRow(
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             AmountText(sale.amount, SafTheme.amounts.row)
-            Text(
-                text = "$card · $time",
-                style = MaterialTheme.typography.bodyMedium.tabular(),
-                color = SafTheme.colors.textMuted,
-                maxLines = 1,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "$card · $time",
+                    style = MaterialTheme.typography.bodyMedium.tabular(),
+                    color = SafTheme.colors.textMuted,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (offline) {
+                    Spacer(Modifier.width(8.dp))
+                    OfflineTag()
+                }
+            }
         }
         Spacer(Modifier.width(12.dp))
         StatusPill(sale.status)
     }
+}
+
+/** Small outlined tag for a sale taken offline: quiet, so it does not compete with the status. */
+@Composable
+fun OfflineTag(modifier: Modifier = Modifier) {
+    Text(
+        text = "Offline",
+        style = MaterialTheme.typography.labelSmall,
+        color = SafTheme.colors.textMuted,
+        modifier = modifier
+            .border(1.dp, SafTheme.colors.hairline, PillShape)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    )
 }
 
 private fun previewSale(cents: Long, card: String?, status: ProcessingStatus, at: String) = Sale(
@@ -106,7 +132,11 @@ private fun SaleRowPreview() = SafPreviewSurface {
     ) {
         SaleRow(previewSale(1250, "•••• 4242", ProcessingStatus.STORED, "2026-10-22T10:14:00Z"), {}, zone = utc)
         HorizontalDivider(color = SafTheme.colors.hairline)
-        SaleRow(previewSale(820, null, ProcessingStatus.SUCCEEDED, "2026-10-22T09:52:00Z"), {}, zone = utc)
+        SaleRow(
+            previewSale(820, null, ProcessingStatus.SUCCEEDED, "2026-10-22T09:52:00Z").copy(channel = SaleChannel.ONLINE),
+            {},
+            zone = utc,
+        )
         HorizontalDivider(color = SafTheme.colors.hairline)
         SaleRow(previewSale(6380, "•••• 0005", ProcessingStatus.FAILED, "2026-10-22T09:03:00Z"), {}, zone = utc)
     }

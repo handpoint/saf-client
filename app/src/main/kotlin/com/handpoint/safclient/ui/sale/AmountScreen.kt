@@ -30,11 +30,15 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.handpoint.safclient.R
+import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.NetworkStatus
+import com.handpoint.safclient.domain.model.PaymentMode
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.ui.components.AmountText
 import com.handpoint.safclient.ui.components.ButtonEmphasis
 import com.handpoint.safclient.ui.components.ConnectionChip
+import com.handpoint.safclient.ui.components.ConnectivityBanner
 import com.handpoint.safclient.ui.components.Keypad
 import com.handpoint.safclient.ui.components.PrimaryButton
 import com.handpoint.safclient.ui.theme.SafPreviewSurface
@@ -43,7 +47,10 @@ import com.handpoint.safclient.ui.theme.SafTheme
 import java.util.Currency
 
 /**
- * Amount entry: the amount large at the top, the keypad, and Charge.
+ * Amount entry: the connectivity banner, the amount large at the top, the keypad, and Charge.
+ *
+ * Charge names the mode: "Charge $12.50" online, "Charge offline $12.50" when the sale will be
+ * stored. It is disabled while the app switches between the two.
  * [shakeSignal] goes up each time a key press is refused; the amount then gives a short shake.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,6 +58,7 @@ import java.util.Currency
 fun AmountContent(
     amount: Money,
     connection: TerminalConnection,
+    mode: ModeState,
     shakeSignal: Int,
     onDigit: (Int) -> Unit,
     onDoubleZero: () -> Unit,
@@ -70,6 +78,11 @@ fun AmountContent(
             actions = { ConnectionChip(connection, Modifier.padding(end = 12.dp)) },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
+        ConnectivityBanner(
+            state = mode,
+            waitingToSend = mode.waitingToSend,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -87,13 +100,19 @@ fun AmountContent(
             Keypad(onDigit = onDigit, onDoubleZero = onDoubleZero, onBackspace = onBackspace)
             Spacer(Modifier.height(16.dp))
             PrimaryButton(
-                text = "Charge ${amount.format()}",
+                text = chargeLabel(amount, mode.mode),
                 onClick = onCharge,
-                enabled = amount.minorUnits > 0,
+                enabled = amount.minorUnits > 0 && !mode.isSwitching,
                 emphasis = ButtonEmphasis.Accent,
             )
         }
     }
+}
+
+/** "Charge $12.50" online; "Charge offline $12.50" when the sale is stored on the terminal. */
+fun chargeLabel(amount: Money, mode: PaymentMode): String = when (mode) {
+    PaymentMode.ONLINE -> "Charge ${amount.format()}"
+    PaymentMode.OFFLINE -> "Charge offline ${amount.format()}"
 }
 
 @Composable
@@ -138,6 +157,7 @@ private fun AmountContentPreview() = SafPreviewSurface {
     AmountContent(
         amount = Money(1250, Currency.getInstance("USD")),
         connection = TerminalConnection.CONNECTED,
+        mode = ModeState(mode = PaymentMode.OFFLINE, network = NetworkStatus.OFFLINE),
         shakeSignal = 0,
         onDigit = {},
         onDoubleZero = {},

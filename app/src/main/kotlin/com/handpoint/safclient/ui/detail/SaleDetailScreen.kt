@@ -63,6 +63,7 @@ import com.handpoint.safclient.domain.model.EntryMode
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
+import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.ui.components.AmountText
 import com.handpoint.safclient.ui.components.EmptyState
@@ -143,7 +144,7 @@ fun SaleDetailScreen(
             )
         },
         bottomBar = {
-            if (sale != null) {
+            if (sale != null && (state.canRefresh || state.canDelete)) {
                 // With edge-to-edge, a custom bottom bar must keep clear of the navigation bar.
                 Column(
                     Modifier
@@ -152,7 +153,9 @@ fun SaleDetailScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    SecondaryButton(text = "Refresh status", onClick = onRefresh, loading = state.refreshing)
+                    if (state.canRefresh) {
+                        SecondaryButton(text = "Refresh status", onClick = onRefresh, loading = state.refreshing)
+                    }
                     if (state.canDelete) {
                         TextButton(
                             onClick = { confirmingDelete = true },
@@ -233,15 +236,25 @@ private fun SaleDetails(sale: Sale, snackbar: SnackbarHostState, modifier: Modif
 /** One step of the sale's way to Handpoint. [at] is `null` while the step is still to come. */
 private data class TimelineStep(val label: String, val at: Instant?, val done: Boolean)
 
-private fun Sale.timeline(): List<TimelineStep> = listOf(
-    TimelineStep("Approved offline", approvedAt, done = true),
-    TimelineStep("Sent to Handpoint", sentAt, done = sentAt != null),
-    if (status.isFinal) {
-        TimelineStep(status.label(), statusCheckedAt, done = true)
-    } else {
-        TimelineStep("Processed by Handpoint", null, done = false)
-    },
-)
+/**
+ * An offline sale goes approved, sent, processed. An online sale is approved and settled by
+ * Handpoint at once: there is no sending step.
+ */
+private fun Sale.timeline(): List<TimelineStep> = when (channel) {
+    SaleChannel.ONLINE -> listOf(
+        TimelineStep("Approved online", approvedAt, done = true),
+        TimelineStep(status.label(), statusCheckedAt, done = true),
+    )
+    SaleChannel.OFFLINE -> listOf(
+        TimelineStep("Approved offline", approvedAt, done = true),
+        TimelineStep("Sent to Handpoint", sentAt, done = sentAt != null),
+        if (status.isFinal) {
+            TimelineStep(status.label(), statusCheckedAt, done = true)
+        } else {
+            TimelineStep("Processed by Handpoint", null, done = false)
+        },
+    )
+}
 
 @Composable
 private fun Timeline(steps: List<TimelineStep>) {
@@ -310,6 +323,8 @@ private fun InfoCard(sale: Sale, snackbar: SnackbarHostState) {
             InfoRow("Card", sale.maskedCard ?: "Card")
             HorizontalDivider(Modifier.padding(start = 16.dp), color = SafTheme.colors.hairline)
             InfoRow("Entry", sale.entryMode.label())
+            HorizontalDivider(Modifier.padding(start = 16.dp), color = SafTheme.colors.hairline)
+            InfoRow("Payment", if (sale.channel == SaleChannel.ONLINE) "Online" else "Offline")
             HorizontalDivider(Modifier.padding(start = 16.dp), color = SafTheme.colors.hairline)
             Row(
                 Modifier.padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),

@@ -7,6 +7,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -23,7 +25,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.handpoint.safclient.ui.components.ConnectivityBanner
+import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.TerminalConnection
 
@@ -33,6 +38,7 @@ fun SaleRoute(viewModel: SaleViewModel, onDone: () -> Unit) {
     val amount by viewModel.amount.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val connection by viewModel.connection.collectAsStateWithLifecycle()
+    val mode by viewModel.mode.collectAsStateWithLifecycle()
     val printing by viewModel.printing.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val haptics = LocalHapticFeedback.current
@@ -52,6 +58,7 @@ fun SaleRoute(viewModel: SaleViewModel, onDone: () -> Unit) {
         amount = amount,
         state = state,
         connection = connection,
+        mode = mode,
         printing = printing,
         shakeSignal = shakeSignal,
         snackbar = snackbar,
@@ -81,7 +88,9 @@ class SaleActions(
 )
 
 /**
- * Amount, card and result in one screen, switched with [AnimatedContent].
+ * Amount, card and result in one screen, switched with [AnimatedContent]. The connectivity
+ * banner stays at the top throughout, so the merchant always knows whether the sale is online
+ * or stored offline.
  *
  * While the sale runs, system back never leaves the screen: it cancels when the terminal allows
  * it and does nothing otherwise, so a sale is never left running unseen.
@@ -91,6 +100,7 @@ fun SaleScreen(
     amount: Money,
     state: ChargeUiState,
     connection: TerminalConnection,
+    mode: ModeState,
     printing: Boolean,
     shakeSignal: Int,
     snackbar: SnackbarHostState,
@@ -128,6 +138,7 @@ fun SaleScreen(
                 ChargeUiState.Idle -> AmountContent(
                     amount = amount,
                     connection = connection,
+                    mode = mode,
                     shakeSignal = shakeSignal,
                     onDigit = actions.onDigit,
                     onDoubleZero = actions.onDoubleZero,
@@ -135,20 +146,37 @@ fun SaleScreen(
                     onCharge = actions.onCharge,
                     onBack = actions.onDone,
                 )
-                is ChargeUiState.InProgress -> CardStepContent(
-                    amount = amount,
-                    step = current.step,
-                    onCancel = actions.onCancel,
-                )
-                is ChargeUiState.Result -> ResultContent(
-                    outcome = current.outcome,
-                    amount = amount,
-                    printing = printing,
-                    onPrint = actions.onPrint,
-                    onTryAgain = actions.onTryAgain,
-                    onDone = actions.onDone,
-                )
+                is ChargeUiState.InProgress -> WithBanner(mode) {
+                    CardStepContent(
+                        amount = amount,
+                        step = current.step,
+                        onCancel = actions.onCancel,
+                    )
+                }
+                is ChargeUiState.Result -> WithBanner(mode) {
+                    ResultContent(
+                        outcome = current.outcome,
+                        amount = amount,
+                        printing = printing,
+                        onPrint = actions.onPrint,
+                        onTryAgain = actions.onTryAgain,
+                        onDone = actions.onDone,
+                    )
+                }
             }
         }
+    }
+}
+
+/** The connectivity banner above [content]; no Send now during the sale flow. */
+@Composable
+private fun WithBanner(mode: ModeState, content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        ConnectivityBanner(
+            state = mode,
+            waitingToSend = mode.waitingToSend,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+        )
+        Box(Modifier.weight(1f)) { content() }
     }
 }

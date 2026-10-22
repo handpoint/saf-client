@@ -48,6 +48,14 @@ sealed interface ChargeUiState {
  *
  * The sale runs in [viewModelScope], so it survives a configuration change. The screen blocks
  * back while the sale runs, so the merchant cannot leave a sale behind.
+ *
+ * If the task is killed mid-sale, the sale is lost to this app: the terminal may still store
+ * it, but the next reconcile on Home does not add it to the journal (only the SDK's start
+ * result carries the sale's details). A partner app should keep its own record of a sale
+ * before it starts, so it can match it later.
+ *
+ * Any error while the sale runs ends as an unknown outcome, never as a plain failure: the
+ * terminal may already hold the sale, and offering Try again could charge the card twice.
  */
 @HiltViewModel
 class SaleViewModel @Inject constructor(
@@ -122,8 +130,9 @@ class SaleViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                // The terminal may have stored the sale before the error (journal or reconcile failed).
                 errors.report("sale", e)
-                SaleOutcome.Failed(e.message ?: "Sale failed")
+                SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN)
             } finally {
                 steps.cancel()
             }
@@ -141,19 +150,25 @@ class SaleViewModel @Inject constructor(
         val current = _state.value as? ChargeUiState.InProgress ?: return
         if (current.step?.cancelAllowed != true) return
         viewModelScope.launch {
-            try {
+            val cancelled = try {
                 withContext(io) { terminal.cancelSale() }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 errors.report("cancel sale", e)
+                false
             }
+            if (!cancelled) _messages.trySend("Can't cancel now — the card has been read.")
         }
     }
 
-    /** Back to the amount screen with the same amount, after a decline or failure. */
+    /**
+     * Back to the amount screen with the same amount, after a decline or failure. Ignored after an
+     * approval or an unknown outcome, where a second charge could take the money twice.
+     */
     fun tryAgain() {
-        if (_state.value is ChargeUiState.Result) _state.value = ChargeUiState.Idle
+        val result = _state.value as? ChargeUiState.Result ?: return
+        if (resultCopy(result.outcome, amount.value.currency).canTryAgain) _state.value = ChargeUiState.Idle
     }
 
     /** Prints the customer receipt of the approved sale (or the merchant one when there is none). */

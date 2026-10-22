@@ -1,9 +1,11 @@
 package com.handpoint.safclient.ui.sale
 
+import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.DeclineReason
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
 import com.handpoint.safclient.domain.usecase.TakeSale
@@ -214,7 +216,7 @@ class SaleViewModelTest {
     fun `currency decline names the currency`() {
         val copy = resultCopy(SaleOutcome.Declined(DeclineReason.CURRENCY_NOT_ACCEPTED), USD)
 
-        assertEquals("This terminal takes offline sales in USD only.", copy.body)
+        assertEquals("This terminal doesn't take offline sales in USD. Check the currency in Settings.", copy.body)
         assertTrue(copy.canTryAgain)
     }
 
@@ -307,7 +309,7 @@ class SaleViewModelTest {
     }
 
     @Test
-    fun `a sale that throws ends as not completed and is reported`() = runTest(dispatcher) {
+    fun `a sale that throws ends as an unknown outcome and is reported`() = runTest(dispatcher) {
         val failing = ThrowingSaleTerminal(terminal)
         val takeSale = TakeSale(failing, journal, ReconcileStoredSales(failing, journal, settings, clock))
         val viewModel = SaleViewModel(takeSale, failing, settings, dispatcher, errors)
@@ -315,10 +317,90 @@ class SaleViewModelTest {
 
         viewModel.charge()
 
-        val state = viewModel.state.value as ChargeUiState.Result
-        assertTrue(state.outcome is SaleOutcome.Failed)
+        assertEquals(ChargeUiState.Result(UNKNOWN), viewModel.state.value)
         assertEquals(listOf("sale" to "SDK gone"), errors.summary())
     }
+
+    @Test
+    fun `journal failure after approval ends as an unknown outcome without try again`() = runTest(dispatcher) {
+        terminal.saleOutcome = SaleOutcome.ApprovedOffline(sale("A"))
+        val failingJournal = RecordFailingJournal(journal)
+        val takeSale = TakeSale(terminal, failingJournal, ReconcileStoredSales(terminal, failingJournal, settings, clock))
+        val viewModel = SaleViewModel(takeSale, terminal, settings, dispatcher, errors)
+        viewModel.enter(5, 0, 0)
+
+        viewModel.charge()
+        viewModel.tryAgain()
+
+        assertEquals(ChargeUiState.Result(UNKNOWN), viewModel.state.value)
+        assertFalse(resultCopy(UNKNOWN, USD).canTryAgain)
+        assertEquals(listOf("sale" to "disk full"), errors.summary())
+    }
+
+    @Test
+    fun `reconcile failure after an unknown outcome ends as an unknown outcome`() = runTest(dispatcher) {
+        terminal.saleOutcome = UNKNOWN
+        terminal.storedError = IllegalStateException("no answer")
+        val viewModel = saleViewModel()
+        viewModel.enter(5, 0, 0)
+
+        viewModel.charge()
+
+        assertEquals(ChargeUiState.Result(UNKNOWN), viewModel.state.value)
+        assertEquals(listOf("sale" to "no answer"), errors.summary())
+    }
+
+    @Test
+    fun `try again is ignored after an unknown outcome`() = runTest(dispatcher) {
+        terminal.saleOutcome = UNKNOWN
+        val viewModel = saleViewModel()
+        viewModel.enter(5, 0, 0)
+        viewModel.charge()
+
+        viewModel.tryAgain()
+
+        assertEquals(ChargeUiState.Result(UNKNOWN), viewModel.state.value)
+    }
+
+    @Test
+    fun `try again is ignored after an approval`() = runTest(dispatcher) {
+        val approved = SaleOutcome.ApprovedOffline(sale("A"))
+        terminal.saleOutcome = approved
+        val viewModel = saleViewModel()
+        viewModel.enter(5, 0, 0)
+        viewModel.charge()
+
+        viewModel.tryAgain()
+
+        assertEquals(ChargeUiState.Result(approved), viewModel.state.value)
+    }
+
+    @Test
+    fun `refused cancel shows a message`() = runTest(dispatcher) {
+        terminal.saleGate = CompletableDeferred()
+        terminal.cancelAccepted = false
+        val viewModel = saleViewModel()
+        val messages = messagesOf(viewModel)
+        viewModel.enter(5, 0, 0)
+        viewModel.charge()
+        terminal.emitCardStep(CardStep(CardStep.Kind.PRESENT_CARD, cancelAllowed = true))
+
+        viewModel.cancel()
+
+        assertEquals(listOf("Can't cancel now — the card has been read."), messages)
+        terminal.saleGate?.complete(Unit)
+    }
+
+    private companion object {
+        val UNKNOWN = SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN)
+    }
+}
+
+/** Journal whose [record] fails, as when the disk is full. */
+private class RecordFailingJournal(
+    private val delegate: SalesJournal,
+) : SalesJournal by delegate {
+    override suspend fun record(sale: Sale) = throw IllegalStateException("disk full")
 }
 
 /** Terminal whose sale throws, as when the SDK cannot be created. */

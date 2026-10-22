@@ -24,9 +24,13 @@ class SendingScreenTest {
 
     private var retries = 0
 
-    private fun show(state: SendingUiState, rows: List<SendingRow> = emptyList()) = compose.setContent {
+    private fun show(
+        state: SendingUiState,
+        rows: List<SendingRow> = emptyList(),
+        finishing: Boolean = false,
+    ) = compose.setContent {
         SafTheme(darkTheme = false) {
-            SendingScreen(state = state, rows = rows, onTryAgain = { retries++ }, onDone = {})
+            SendingScreen(state = state, rows = rows, onTryAgain = { retries++ }, onDone = {}, finishing = finishing)
         }
     }
 
@@ -59,6 +63,14 @@ class SendingScreenTest {
         compose.onNodeWithText("Still on terminal").assertExists()
         compose.onNodeWithText("Try again").performClick()
         assertEquals(1, retries)
+    }
+
+    @Test
+    fun tryAgainWaitsWhileTheRunIsFinishing() {
+        show(SendingUiState.Done(ForwardingResult.NoneSent(ForwardingError.NETWORK, 0, 3, 3)), finishing = true)
+
+        compose.onNodeWithText("Finishing up…").assertExists()
+        compose.onNodeWithText("Try again").assertDoesNotExist()
     }
 
     @Test

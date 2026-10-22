@@ -18,8 +18,8 @@ data class ResultCopy(
 enum class ResultKind { APPROVED, DECLINED, UNKNOWN }
 
 /**
- * Merchant-facing copy for a sale outcome. [currency] is the currency the terminal takes
- * offline sales in, named when the terminal refuses another one.
+ * Merchant-facing copy for a sale outcome. [currency] is the SAF currency from settings, the one
+ * the sale was taken in; it is named when the terminal refuses it.
  *
  * An unknown outcome offers no Try again: the terminal may already hold the sale, and a second
  * charge could take the money twice.
@@ -72,7 +72,8 @@ private fun DeclineReason.message(currency: Currency): String = when (this) {
     DeclineReason.TERMINAL_LIMIT_REACHED ->
         "This terminal has reached its offline limit. Send stored sales, then try again."
     DeclineReason.CARD_EXPIRED -> "The card's chip has expired. Ask for another card."
-    DeclineReason.CURRENCY_NOT_ACCEPTED -> "This terminal takes offline sales in ${currency.currencyCode} only."
+    DeclineReason.CURRENCY_NOT_ACCEPTED ->
+        "This terminal doesn't take offline sales in ${currency.currencyCode}. Check the currency in Settings."
     DeclineReason.CARD_NOT_ACCEPTED -> "This card isn't accepted."
     DeclineReason.OTHER -> "The sale couldn't be completed."
 }

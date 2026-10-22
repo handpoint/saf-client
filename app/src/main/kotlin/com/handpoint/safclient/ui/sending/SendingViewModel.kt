@@ -16,7 +16,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.time.Instant
 import javax.inject.Inject
 
 sealed interface SendingUiState {
@@ -62,19 +64,37 @@ class SendingViewModel @Inject constructor(
     /** The sales of the run: those stored when it started, plus any it reported sent. */
     val rows: StateFlow<List<SendingRow>> = _rows.asStateFlow()
 
-    private var run: Job = start()
+    /**
+     * `true` from the start of a run until its journal updates are done, which goes on a little
+     * after the run's result is shown. Try again waits for it to turn `false`.
+     */
+    val isRunning: StateFlow<Boolean> = sendStoredSales.isRunning
 
-    /** Sends again after a run that ended. Ignored while a run is active. */
+    /** Approval time of each row's sale, to keep rows oldest first. */
+    private val approvedAt = mutableMapOf<SaleReference, Instant>()
+
+    private var run: Job = viewModelScope.launch { runOnce() }
+
+    /**
+     * Sends again after a run that ended. Ignored while a run is active. Waits for the previous
+     * run to finish its journal updates first: joining it would only replay its result.
+     */
     fun retry() {
         if (run.isActive || _state.value !is SendingUiState.Done) return
-        _state.value = SendingUiState.Starting
-        run = start()
+        run = viewModelScope.launch {
+            isRunning.first { !it }
+            _state.value = SendingUiState.Starting
+            runOnce()
+        }
     }
 
-    private fun start(): Job = viewModelScope.launch {
+    private suspend fun runOnce() {
         try {
             // Read before the run marks any sale sent; sales already sent by a joined run come back as events.
-            _rows.value = journal.pending()
+            val pending = journal.pending()
+            approvedAt.clear()
+            pending.forEach { approvedAt[it.reference] = it.approvedAt }
+            _rows.value = pending
                 .sortedBy { it.approvedAt }
                 .map { SendingRow(it.reference, it.amount, SendingRowStatus.WAITING) }
             sendStoredSales().collect(::onEvent)
@@ -82,8 +102,9 @@ class SendingViewModel @Inject constructor(
             throw e
         } catch (e: Exception) {
             errors.report("send stored sales", e)
-            finish(ForwardingResult.NoneSent(ForwardingError.FAILED, 0, 0, 0))
         }
+        // A run always ends with a result; if none came (or it failed), say it could not be sent.
+        if (_state.value !is SendingUiState.Done) finish(ForwardingResult.NoneSent(ForwardingError.FAILED, 0, 0, 0))
     }
 
     private suspend fun onEvent(event: ForwardingEvent) {
@@ -105,7 +126,9 @@ class SendingViewModel @Inject constructor(
         } else {
             // Sent by a run that was already active when the screen opened.
             val sale = journal.find(reference) ?: return
-            _rows.value = listOf(SendingRow(reference, sale.amount, SendingRowStatus.SENT)) + rows
+            approvedAt[reference] = sale.approvedAt
+            _rows.value = (rows + SendingRow(reference, sale.amount, SendingRowStatus.SENT))
+                .sortedBy { approvedAt[it.reference] }
         }
     }
 

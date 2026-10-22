@@ -45,6 +45,9 @@ class FakeTerminal : StoreAndForwardTerminal {
     /** When set, [sale] waits for it before it answers, to hold a sale in progress. */
     var saleGate: CompletableDeferred<Unit>? = null
 
+    /** Answer of [cancelSale]; `false` acts as a card that has already been read. */
+    var cancelAccepted: Boolean = true
+
     /** Answer of [printReceipt]; `false` acts as a terminal without a printer. */
     var printAccepted: Boolean = true
 
@@ -100,7 +103,7 @@ class FakeTerminal : StoreAndForwardTerminal {
 
     override fun cancelSale(): Boolean {
         cancelCalls++
-        return true
+        return cancelAccepted
     }
 
     override suspend fun storedOnTerminal(): StoredSummary? {

@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.handpoint.safclient.R
@@ -70,9 +71,20 @@ import java.util.Currency
 fun SendingRoute(viewModel: SendingViewModel, onDone: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val rows by viewModel.rows.collectAsStateWithLifecycle()
-    SendingScreen(state = state, rows = rows, onTryAgain = viewModel::retry, onDone = onDone)
+    val isRunning by viewModel.isRunning.collectAsStateWithLifecycle()
+    SendingScreen(
+        state = state,
+        rows = rows,
+        finishing = isRunning,
+        onTryAgain = viewModel::retry,
+        onDone = onDone,
+    )
 }
 
+/**
+ * The Send now screen. [finishing] is `true` while the run's journal updates go on after its
+ * result; Try again is not offered until they are done.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SendingScreen(
@@ -81,6 +93,7 @@ fun SendingScreen(
     onTryAgain: () -> Unit,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
+    finishing: Boolean = false,
 ) {
     val background = MaterialTheme.colorScheme.background
     Scaffold(
@@ -106,7 +119,17 @@ fun SendingScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     if (state.result.canTryAgain()) {
-                        PrimaryButton(text = "Try again", onClick = onTryAgain, emphasis = ButtonEmphasis.Accent)
+                        if (finishing) {
+                            Text(
+                                text = "Finishing up…",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = SafTheme.colors.textMuted,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            PrimaryButton(text = "Try again", onClick = onTryAgain, emphasis = ButtonEmphasis.Accent)
+                        }
                         SecondaryButton(text = "Done", onClick = onDone)
                     } else {
                         PrimaryButton(text = "Done", onClick = onDone, emphasis = ButtonEmphasis.Accent)

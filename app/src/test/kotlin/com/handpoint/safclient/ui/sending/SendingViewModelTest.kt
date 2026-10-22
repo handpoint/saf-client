@@ -17,6 +17,7 @@ import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.testutil.RecordingErrorReporter
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -63,16 +64,16 @@ class SendingViewModelTest {
     fun tearDown() = Dispatchers.resetMain()
 
     /** The app scope outlives the screen, as in the app: it is not a child of the test. */
-    private fun TestScope.sendingViewModel(): SendingViewModel {
-        val send = SendStoredSales(
-            terminal = terminal,
-            journal = journal,
-            reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
-            clock = clock,
-            appScope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()),
-        )
-        return SendingViewModel(send, journal, errors)
-    }
+    private fun TestScope.sendStoredSales() = SendStoredSales(
+        terminal = terminal,
+        journal = journal,
+        reconcile = ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
+        clock = clock,
+        appScope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()),
+    )
+
+    private fun TestScope.sendingViewModel(send: SendStoredSales = sendStoredSales()) =
+        SendingViewModel(send, journal, errors)
 
     private fun ref(value: String) = SaleReference(value)
 
@@ -132,6 +133,54 @@ class SendingViewModelTest {
         assertEquals(SendingUiState.Done(allSent), viewModel.state.value)
         assertEquals(listOf("B", "C"), viewModel.rows.value.map { it.reference.value }.sorted())
         assertTrue(viewModel.rows.value.all { it.status == SendingRowStatus.SENT })
+    }
+
+    @Test
+    fun `retry waits for the previous run to finish its journal updates`() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        terminal.storedGate = gate
+        val noConnection = ForwardingResult.NoneSent(ForwardingError.NETWORK, 0, 3, 3)
+        terminal.forwardScript = listOf(Started(3), Finished(noConnection))
+        val viewModel = sendingViewModel()
+        advanceUntilIdle()
+        assertEquals(SendingUiState.Done(noConnection), viewModel.state.value)
+        assertTrue(viewModel.isRunning.value) // reconcile held open
+
+        val allSent = ForwardingResult.AllSent(3)
+        terminal.forwardScript = listOf(Started(3), Finished(allSent))
+        viewModel.retry()
+        viewModel.retry()
+        advanceUntilIdle()
+
+        assertEquals(1, terminal.forwardCalls)
+        assertEquals(SendingUiState.Done(noConnection), viewModel.state.value)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(2, terminal.forwardCalls)
+        assertEquals(SendingUiState.Done(allSent), viewModel.state.value)
+    }
+
+    @Test
+    fun `rows of a joined run stay oldest first`() = runTest(dispatcher) {
+        journal.record(sale("A").copy(approvedAt = Instant.parse("2026-10-22T09:00:00Z")))
+        journal.record(sale("B").copy(approvedAt = Instant.parse("2026-10-22T10:00:00Z")))
+        journal.record(sale("C").copy(approvedAt = Instant.parse("2026-10-22T11:00:00Z")))
+        val send = sendStoredSales()
+        send() // a run started from elsewhere before the screen opened
+        runCurrent()
+        terminal.emitForwarding(Started(3))
+        terminal.emitForwarding(Sent(ref("B"), 1, 3))
+        runCurrent()
+
+        val viewModel = sendingViewModel(send)
+        runCurrent()
+
+        assertEquals(listOf("A", "B", "C"), viewModel.rows.value.map { it.reference.value })
+        assertEquals(SendingRowStatus.SENT, viewModel.rows.value[1].status)
+        terminal.emitForwarding(Finished(ForwardingResult.AllSent(3)))
+        advanceUntilIdle()
     }
 
     @Test

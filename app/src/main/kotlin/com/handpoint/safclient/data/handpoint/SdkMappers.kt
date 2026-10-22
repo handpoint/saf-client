@@ -9,6 +9,7 @@ import com.handpoint.api.shared.TransactionResult
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionErrorReason
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionStatus
 import com.handpoint.api.shared.storeandforward.TransactionReference
+import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.DeclineReason
 import com.handpoint.safclient.domain.model.EntryMode
@@ -65,7 +66,10 @@ internal fun TransactionResult.toOutcome(amount: Money, now: Instant): SaleOutco
             }
         }
 
-        else -> SaleOutcome.Failed(errorMessage.ifBlank { "Unexpected result: $finStatus" })
+        // Any other status (for example an online AUTHORISED) is not a result this flow
+        // expects: the terminal may still have stored the sale, so treat the outcome as unknown
+        // and let the caller reconcile before the merchant charges again.
+        else -> SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN)
     }
 
 /**

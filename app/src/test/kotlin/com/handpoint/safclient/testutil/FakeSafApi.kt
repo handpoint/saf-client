@@ -38,7 +38,13 @@ class FakeSafApi : StoreAndForwardPaymentsApi {
         delegates.filterIsInstance<T>().forEach(callback)
     }
 
-    override fun start(): Boolean = record("start")
+    /** Runs inside [start], before it returns: lets a test hold a start in flight. */
+    var duringStart: () -> Unit = {}
+
+    override fun start(): Boolean {
+        duringStart()
+        return record("start")
+    }
 
     override fun stop(): Boolean = record("stop")
 

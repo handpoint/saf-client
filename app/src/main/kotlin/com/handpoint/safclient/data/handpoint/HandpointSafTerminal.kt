@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.math.BigInteger
 import java.time.Clock
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -96,11 +97,27 @@ class HandpointSafTerminal(
 
     override val forwarding: SharedFlow<ForwardingEvent> = bridge.forwarding.asSharedFlow()
 
+    /** `true` while a `start()` is in flight. */
+    private val starting = AtomicBoolean(false)
+
     /**
      * Calls `start()`. The first call to this adapter creates the SDK through `apiFactory`,
      * which is heavy setup: call it off the main thread.
+     *
+     * Single flight: Home and Settings can both connect at the same time, but only one
+     * `start()` runs at once. A call made while a start is in flight does not start the SDK
+     * again; it returns `true` at once, and the result of the start in flight arrives on
+     * [connection]. An AtomicBoolean keeps `connect()` non-suspending, as the port defines it,
+     * and does not block the second caller's thread.
      */
-    override fun connect(): Boolean = api.start()
+    override fun connect(): Boolean {
+        if (!starting.compareAndSet(false, true)) return true
+        try {
+            return api.start()
+        } finally {
+            starting.set(false)
+        }
+    }
 
     override fun disconnect(): Boolean = api.stop()
 

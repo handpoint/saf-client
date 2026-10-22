@@ -9,6 +9,7 @@ import com.handpoint.api.shared.StatusInfo
 import com.handpoint.api.shared.TransactionResult
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionErrorReason
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionStatus
+import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.DeclineReason
 import com.handpoint.safclient.domain.model.EntryMode
@@ -99,10 +100,16 @@ class SdkMappersTest {
             SaleOutcome.Declined(DeclineReason.CARD_EXPIRED),
             transactionResult(FinancialStatus.DECLINED, errorMessage = "EXPIRED_CARD").toOutcome(amount, now),
         )
-        assertEquals(
-            SaleOutcome.Failed("boom"),
-            transactionResult(FinancialStatus.UNDEFINED, errorMessage = "boom").toOutcome(amount, now),
-        )
+    }
+
+    @Test
+    fun `an unexpected status is an unknown outcome, so the app reconciles`() {
+        for (status in listOf(FinancialStatus.UNDEFINED, FinancialStatus.AUTHORISED)) {
+            assertEquals(
+                SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN),
+                transactionResult(status, errorMessage = "boom").toOutcome(amount, now),
+            )
+        }
     }
 
     @Test

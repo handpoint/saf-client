@@ -44,6 +44,8 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Currency
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.time.Duration.Companion.seconds
 import com.handpoint.api.shared.Currency as SdkCurrency
@@ -65,6 +67,29 @@ class HandpointSafTerminalTest {
     )
 
     // --- lifecycle ---------------------------------------------------------------------------
+
+    @Test
+    fun `a connect while a start is in flight does not start the SDK again`() {
+        val terminal = newTerminal()
+        val inStart = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        fake.duringStart = {
+            inStart.countDown()
+            release.await(5, TimeUnit.SECONDS)
+        }
+        val first = thread { terminal.connect() }
+        assertTrue(inStart.await(5, TimeUnit.SECONDS))
+
+        assertTrue(terminal.connect()) // joins the start in flight
+
+        release.countDown()
+        first.join(5_000)
+        assertEquals(listOf("start"), fake.calls.filter { it == "start" })
+
+        fake.duringStart = {}
+        terminal.connect() // the start has ended: a new connect starts again
+        assertEquals(2, fake.calls.count { it == "start" })
+    }
 
     @Test
     fun `creates the SDK lazily, once, and registers the bridge for SAF events`() = runTest {

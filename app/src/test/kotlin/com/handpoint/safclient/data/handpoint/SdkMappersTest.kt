@@ -22,12 +22,12 @@ import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.SALE_REFERENCE
+import java.time.Instant
+import java.util.Currency
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.Instant
-import java.util.Currency
 
 class SdkMappersTest {
 
@@ -45,6 +45,13 @@ class SdkMappersTest {
         assertEquals(DeclineReason.CURRENCY_NOT_ACCEPTED, "Invalid currency for this terminal".toDeclineReason())
         assertEquals(DeclineReason.CARD_NOT_ACCEPTED, "TEXT_CARD_NOT_SUPPORTED".toDeclineReason())
         assertEquals(DeclineReason.OTHER, "TEXT_DEFAULT_ERROR_MSG".toDeclineReason())
+        // SDK 7.1014.2 and later.
+        assertEquals(DeclineReason.OVER_SALE_LIMIT, "SAF_TRANSACTION_LIMIT_EXCEEDED".toDeclineReason())
+        assertEquals(DeclineReason.CARD_LIMIT_REACHED, "SAF_CARD_LIMIT_EXCEEDED".toDeclineReason())
+        assertEquals(DeclineReason.TERMINAL_LIMIT_REACHED, "SAF_BATCH_LIMIT_EXCEEDED".toDeclineReason())
+        assertEquals(DeclineReason.CURRENCY_NOT_ACCEPTED, "SAF_CURRENCY_NOT_ACCEPTED".toDeclineReason())
+        assertEquals(DeclineReason.INVALID_AMOUNT, "TEXT_ERROR_AMOUNT".toDeclineReason())
+        assertEquals(DeclineReason.DECLINED, "TRANSACTION_DECLINED".toDeclineReason())
         assertEquals(DeclineReason.OTHER, "".toDeclineReason())
     }
 
@@ -93,12 +100,12 @@ class SdkMappersTest {
     fun `cancelled, failed, declined and other statuses map to their outcomes`() {
         assertEquals(SaleOutcome.Cancelled, transactionResult(FinancialStatus.CANCELLED).toOutcome(amount, now))
         assertEquals(
-            SaleOutcome.Declined(DeclineReason.PREPAID_CARD),
-            transactionResult(FinancialStatus.FAILED, errorMessage = "PREPAID_CARD").toOutcome(amount, now),
+            DeclineReason.PREPAID_CARD,
+            (transactionResult(FinancialStatus.FAILED, errorMessage = "PREPAID_CARD").toOutcome(amount, now) as SaleOutcome.Declined).reason,
         )
         assertEquals(
-            SaleOutcome.Declined(DeclineReason.CARD_EXPIRED),
-            transactionResult(FinancialStatus.DECLINED, errorMessage = "EXPIRED_CARD").toOutcome(amount, now),
+            DeclineReason.CARD_EXPIRED,
+            (transactionResult(FinancialStatus.DECLINED, errorMessage = "EXPIRED_CARD").toOutcome(amount, now) as SaleOutcome.Declined).reason,
         )
     }
 
@@ -214,7 +221,9 @@ class SdkMappersTest {
         // What the SDK's own decline path does: same key in both, errorMessage then translated.
         val declined = transactionResult(FinancialStatus.FAILED, errorMessage = "EXCEEDED_MAX_AMOUNT_BY_PAN")
 
-        assertEquals(SaleOutcome.Declined(DeclineReason.CARD_LIMIT_REACHED), declined.toOutcome(amount, now))
+        val outcome = declined.toOutcome(amount, now) as SaleOutcome.Declined
+        assertEquals(DeclineReason.CARD_LIMIT_REACHED, outcome.reason)
+        assertEquals(declined.errorMessage, outcome.message) // the translated message is shown
     }
 
     /** Builds a result the way the SDK's TransactionResultFactory does. */
@@ -225,4 +234,27 @@ class SdkMappersTest {
             statusMessage = errorMessage
             this.errorMessage = errorMessage
         }
+
+    @Test
+    fun `each SDK decline code gives its reason and keeps the SDK's readable message`() {
+        val codes = mapOf(
+            "SAF_TRANSACTION_LIMIT_EXCEEDED" to DeclineReason.OVER_SALE_LIMIT,
+            "SAF_CARD_LIMIT_EXCEEDED" to DeclineReason.CARD_LIMIT_REACHED,
+            "SAF_BATCH_LIMIT_EXCEEDED" to DeclineReason.TERMINAL_LIMIT_REACHED,
+            "SAF_CURRENCY_NOT_ACCEPTED" to DeclineReason.CURRENCY_NOT_ACCEPTED,
+            "TEXT_ERROR_AMOUNT" to DeclineReason.INVALID_AMOUNT,
+            "EXPIRED_CARD" to DeclineReason.CARD_EXPIRED,
+            "PREPAID_CARD" to DeclineReason.PREPAID_CARD,
+            "TRANSACTION_DECLINED" to DeclineReason.DECLINED,
+        )
+        for ((code, reason) in codes) {
+            val result = TransactionResult().apply {
+                finStatus = FinancialStatus.FAILED
+                transactionReference = SALE_REFERENCE
+                statusMessage = code
+                errorMessage = "Readable message for $code"
+            }
+            assertEquals(code, SaleOutcome.Declined(reason, "Readable message for $code"), result.toOutcome(amount, now))
+        }
+    }
 }

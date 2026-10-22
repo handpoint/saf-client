@@ -194,6 +194,15 @@ class SaleViewModel @Inject constructor(
         if (resultCopy(result.outcome, amount.value.currency).canTryAgain) _state.value = ChargeUiState.Idle
     }
 
+    /**
+     * Back to the amount screen, with the amount kept for editing, after the terminal refused the
+     * amount itself (for example over the offline limit per sale). Ignored after other outcomes.
+     */
+    fun changeAmount() {
+        val result = _state.value as? ChargeUiState.Result ?: return
+        if (resultCopy(result.outcome, amount.value.currency).canChangeAmount) _state.value = ChargeUiState.Idle
+    }
+
     /** Prints the customer receipt of the approved sale (or the merchant one when there is none). */
     fun printReceipt() {
         val sale = (_state.value as? ChargeUiState.Result)?.outcome?.approvedSale ?: return

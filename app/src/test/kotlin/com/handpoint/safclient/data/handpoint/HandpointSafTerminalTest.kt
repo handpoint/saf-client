@@ -1,8 +1,9 @@
 package com.handpoint.safclient.data.handpoint
 
 import app.cash.turbine.test
-import com.handpoint.api.shared.Events
 import com.handpoint.api.shared.ConnectionStatus
+import com.handpoint.api.shared.Currency as SdkCurrency
+import com.handpoint.api.shared.Events
 import com.handpoint.api.shared.FinancialStatus
 import com.handpoint.api.shared.OperationStartResult
 import com.handpoint.api.shared.SafTransactionStatus
@@ -27,18 +28,6 @@ import com.handpoint.safclient.testutil.FakeSafApi
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.DEVICE
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.OTHER_REFERENCE
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.SALE_REFERENCE
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.test.runTest
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
 import java.math.BigInteger
 import java.time.Clock
 import java.time.Instant
@@ -48,7 +37,18 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.time.Duration.Companion.seconds
-import com.handpoint.api.shared.Currency as SdkCurrency
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class) // runCurrent, currentTime
 class HandpointSafTerminalTest {
@@ -228,7 +228,8 @@ class HandpointSafTerminalTest {
         fake.saleStart = OperationStartResult(false, errorMessage = "x")
 
         assertEquals(SaleOutcome.Failed("x"), terminal.sale(amount))
-        assertEquals(0L, testScheduler.currentTime) // a refusal with a message does not wait
+        // The SDK may still send a decline code for it: wait the short window first.
+        assertEquals(2_000L, testScheduler.currentTime)
     }
 
     @Test
@@ -254,7 +255,10 @@ class HandpointSafTerminalTest {
             }
         }
 
-        assertEquals(SaleOutcome.Declined(DeclineReason.CURRENCY_NOT_ACCEPTED), terminal.sale(amount))
+        assertEquals(
+            SaleOutcome.Declined(DeclineReason.CURRENCY_NOT_ACCEPTED, "Invalid currency: USD. Expected: GBP"),
+            terminal.sale(amount),
+        )
     }
 
     @Test
@@ -503,5 +507,53 @@ class HandpointSafTerminalTest {
         transactionReference = reference
         statusMessage = message
         errorMessage = message
+    }
+
+    // --- declines before the card is read (SDK 7.1014.2 and later) ----------------------------
+
+    @Test
+    fun `a decline over the per-sale limit gives its reason and the SDK's message`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        val message = "This sale is over the offline limit of $1.00 per sale."
+        fake.saleStart = OperationStartResult(false, transactionReference = SALE_REFERENCE, errorMessage = message)
+        fake.duringSale = {
+            fire<Events.EndOfTransaction> {
+                it.endOfTransaction(
+                    TransactionResult().apply {
+                        finStatus = FinancialStatus.FAILED
+                        transactionReference = SALE_REFERENCE
+                        statusMessage = "SAF_TRANSACTION_LIMIT_EXCEEDED"
+                        errorMessage = message
+                    },
+                    DEVICE,
+                )
+            }
+        }
+
+        assertEquals(SaleOutcome.Declined(DeclineReason.OVER_SALE_LIMIT, message), terminal.sale(amount))
+    }
+
+    @Test
+    fun `a decline with a reference but no result keeps the start message as a decline`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        val message = "This sale is over the offline limit of $1.00 per sale."
+        fake.saleStart = OperationStartResult(false, transactionReference = SALE_REFERENCE, errorMessage = message)
+
+        assertEquals(SaleOutcome.Declined(DeclineReason.OTHER, message), terminal.sale(amount))
+        assertEquals(2_000L, testScheduler.currentTime)
+    }
+
+    @Test
+    fun `the result of another sale is not taken as this decline`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        fake.saleStart = OperationStartResult(false, transactionReference = SALE_REFERENCE, errorMessage = "Declined here")
+        fake.duringSale = {
+            fire<Events.EndOfTransaction> { it.endOfTransaction(approvedResult(OTHER_REFERENCE), DEVICE) }
+        }
+
+        assertEquals(SaleOutcome.Declined(DeclineReason.OTHER, "Declined here"), terminal.sale(amount))
     }
 }

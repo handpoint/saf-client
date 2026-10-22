@@ -7,8 +7,11 @@ sealed interface SaleOutcome {
     /** Handpoint approved the sale online: the card has been charged. */
     data class ApprovedOnline(val sale: Sale) : SaleOutcome
 
-    /** Store and Forward declined the sale for a known [reason]. */
-    data class Declined(val reason: DeclineReason) : SaleOutcome
+    /**
+     * Store and Forward declined the sale for [reason]. [message] is the SDK's readable message
+     * (translated, with the limit as money when it has one), or blank when it gave none.
+     */
+    data class Declined(val reason: DeclineReason, val message: String = "") : SaleOutcome
 
     /**
      * Handpoint declined the sale online. [message] is the SDK's readable message (translated

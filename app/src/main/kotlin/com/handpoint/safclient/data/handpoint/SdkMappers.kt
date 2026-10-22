@@ -57,14 +57,15 @@ internal fun TransactionResult.toOutcome(amount: Money, now: Instant): SaleOutco
 
         FinancialStatus.CANCELLED -> SaleOutcome.Cancelled
 
-        // Offline declines (card limit, prepaid card, ...) arrive as FAILED with a known key.
-        // A FAILED result with any other key is an error, not a decline.
+        // Offline declines (limits, prepaid card, ...) arrive as FAILED with a known code in
+        // `_statusMessage`, and a translated message in `errorMessage` that the app shows as it is.
+        // A FAILED result with any other code is an error, not a decline.
         FinancialStatus.FAILED, FinancialStatus.DECLINED -> {
             val reason = declineReason()
             if (reason != DeclineReason.OTHER || finStatus == FinancialStatus.DECLINED) {
-                SaleOutcome.Declined(reason)
+                SaleOutcome.Declined(reason, readableMessage())
             } else {
-                SaleOutcome.Failed(errorMessage.ifBlank { "The sale failed" })
+                SaleOutcome.Failed(readableMessage().ifBlank { "The sale failed" })
             }
         }
 
@@ -103,7 +104,7 @@ internal fun TransactionResult.toOnlineOutcome(amount: Money, now: Instant): Sal
         // The message is shown as it is, unless it is blank or a raw key ("EXPIRED_CARD"):
         // then the reason the key gives lets the app say it in its own words.
         FinancialStatus.DECLINED -> SaleOutcome.DeclinedOnline(
-            message = errorMessage.takeUnless { it.isBlank() || it.isRawKey() }.orEmpty(),
+            message = readableMessage(),
             reason = declineReason(),
         )
         FinancialStatus.CANCELLED -> SaleOutcome.Cancelled
@@ -126,16 +127,30 @@ private fun TransactionResult.declineReason(): DeclineReason {
     return if (fromKey != DeclineReason.OTHER) fromKey else errorMessage.toDeclineReason()
 }
 
-/** Maps an SDK decline code to the reason the app explains to the merchant. */
+/**
+ * Maps an SDK decline code to the reason the app explains to the merchant.
+ *
+ * SDK 7.1014.2 and later send stable `SAF_*` codes; the older keys stay for older SDKs.
+ */
 internal fun String.toDeclineReason(): DeclineReason = when {
+    this == "SAF_TRANSACTION_LIMIT_EXCEEDED" -> DeclineReason.OVER_SALE_LIMIT
+    this == "SAF_CARD_LIMIT_EXCEEDED" || this == "EXCEEDED_MAX_AMOUNT_BY_PAN" -> DeclineReason.CARD_LIMIT_REACHED
+    this == "SAF_BATCH_LIMIT_EXCEEDED" || this == "EXCEEDED_MAX_AMOUNT" -> DeclineReason.TERMINAL_LIMIT_REACHED
+    this == "SAF_CURRENCY_NOT_ACCEPTED" || this == "TEXT_ERROR_CURRENCY" || startsWith("Invalid currency") ->
+        DeclineReason.CURRENCY_NOT_ACCEPTED
+    this == "TEXT_ERROR_AMOUNT" -> DeclineReason.INVALID_AMOUNT
     this == "PREPAID_CARD" -> DeclineReason.PREPAID_CARD
-    this == "EXCEEDED_MAX_AMOUNT_BY_PAN" -> DeclineReason.CARD_LIMIT_REACHED
-    this == "EXCEEDED_MAX_AMOUNT" -> DeclineReason.TERMINAL_LIMIT_REACHED
     this == "EXPIRED_CARD" -> DeclineReason.CARD_EXPIRED
-    this == "TEXT_ERROR_CURRENCY" || startsWith("Invalid currency") -> DeclineReason.CURRENCY_NOT_ACCEPTED
     this == "TEXT_CARD_NOT_SUPPORTED" -> DeclineReason.CARD_NOT_ACCEPTED
+    this == "TRANSACTION_DECLINED" -> DeclineReason.DECLINED
     else -> DeclineReason.OTHER
 }
+
+/** The SDK's `errorMessage` when people can read it: blank for none or for a raw key. */
+internal fun TransactionResult.readableMessage(): String = errorMessage.readableOrBlank()
+
+/** This text, or blank when it is blank or a raw SDK key such as `EXPIRED_CARD`. */
+internal fun String.readableOrBlank(): String = takeUnless { it.isBlank() || it.isRawKey() }.orEmpty()
 
 /** `"************4242"` becomes `"•••• 4242"`. No card number gives `null`. */
 private fun String.toMaskedCard(): String? =

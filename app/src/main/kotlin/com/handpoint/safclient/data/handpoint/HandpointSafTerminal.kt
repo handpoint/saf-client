@@ -1,6 +1,7 @@
 package com.handpoint.safclient.data.handpoint
 
 import com.handpoint.api.shared.Events
+import com.handpoint.api.shared.OperationStartResult
 import com.handpoint.api.shared.TransactionResult
 import com.handpoint.api.shared.options.SaleOptions
 import com.handpoint.api.shared.storeandforward.StoreAndForwardPaymentsApi
@@ -184,7 +185,7 @@ class HandpointSafTerminal(
             if (start.operationStarted) {
                 awaitSaleEnd(api, start.transactionReference, amount, results)
             } else {
-                rejectionOutcome(start.errorMessage, amount, results)
+                rejectionOutcome(start, amount, results)
             }
         }
 
@@ -219,22 +220,32 @@ class HandpointSafTerminal(
     /**
      * The outcome of a sale the SDK did not start.
      *
-     * A refusal with a message (busy, not connected, ...) fails at once. When one of its checks
-     * rejects the sale (wrong currency, invalid amount, ...), the SDK returns no message and
-     * sends the reason as an endOfTransaction without a reference, possibly just after
-     * `sale()` returns. Wait briefly for it.
+     * When one of its checks declines the sale before the card is read (over the per-sale
+     * limit, wrong currency, invalid amount, ...), the SDK also sends an endOfTransaction with
+     * the decline code, possibly just after `sale()` returns. SDK 7.1014.2 and later give it the
+     * sale's reference (also in `OperationStartResult`) and fill `errorMessage` with a readable
+     * message; older SDKs send it without a reference and leave `errorMessage` empty. So wait
+     * briefly for it in both cases, and map it by its code. Without it: a start with a
+     * reference was a decline (keep the SDK's message); without one, a refusal (busy, not
+     * connected, ...).
      */
     private suspend fun rejectionOutcome(
-        startError: String,
+        start: OperationStartResult,
         amount: Money,
         results: Flow<TransactionResult>,
     ): SaleOutcome {
-        if (startError.isNotBlank()) return SaleOutcome.Failed(startError)
+        val reference = start.transactionReference
         val rejection = withTimeoutOrNull(REJECTION_TIMEOUT) {
-            results.first { it.transactionReference.isBlank() }
+            results.first { it.transactionReference.isBlank() || it.transactionReference == reference }
         }
-        return rejection?.toOutcome(amount, clock.instant())
-            ?: SaleOutcome.Failed("The terminal did not start the sale")
+        if (rejection != null) return rejection.toOutcome(amount, clock.instant())
+        val message = start.errorMessage.readableOrBlank()
+        return when {
+            reference.isNotBlank() && message.isNotBlank() ->
+                SaleOutcome.Declined(start.errorMessage.toDeclineReason(), message)
+            message.isNotBlank() -> SaleOutcome.Failed(message)
+            else -> SaleOutcome.Failed("The terminal did not start the sale")
+        }
     }
 
     override fun cancelSale(): Boolean = api()?.stopCurrentTransaction() ?: false

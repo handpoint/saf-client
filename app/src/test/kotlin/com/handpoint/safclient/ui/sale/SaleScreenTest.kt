@@ -158,4 +158,54 @@ class SaleScreenTest {
 
         compose.onNodeWithText("The card has expired. Ask for another card.").assertExists()
     }
+
+    // --- declines of the amount ------------------------------------------------------------------
+
+    private val overLimit = SaleOutcome.Declined(
+        DeclineReason.OVER_SALE_LIMIT,
+        "This sale is over the offline limit of $1.00 per sale.",
+    )
+
+    @Test
+    fun anOverLimitDeclineShowsTheSdkMessageAndOffersChangeAmount() {
+        var changes = 0
+        compose.setContent {
+            SafTheme(darkTheme = false) {
+                SaleScreen(
+                    amount = Money(30100, USD),
+                    state = ChargeUiState.Result(overLimit),
+                    connection = TerminalConnection.CONNECTED,
+                    mode = offline,
+                    printing = false,
+                    shakeSignal = 0,
+                    snackbar = SnackbarHostState(),
+                    actions = SaleActions(onChangeAmount = { changes++ }),
+                )
+            }
+        }
+
+        compose.onNodeWithText("Over the offline limit").assertExists()
+        compose.onNodeWithText("This sale is over the offline limit of $1.00 per sale.").assertExists()
+        compose.onNodeWithText("Try again").assertDoesNotExist()
+        compose.onNodeWithText("Done").assertExists()
+        compose.onNodeWithText("Change amount").performClick()
+        assertEquals(1, changes)
+    }
+
+    @Test
+    fun aCardLimitDeclineKeepsTryAgain() {
+        show(Money(1250, USD), ChargeUiState.Result(SaleOutcome.Declined(DeclineReason.CARD_LIMIT_REACHED)), mode = offline)
+
+        compose.onNodeWithText("Try again").assertExists()
+        compose.onNodeWithText("Change amount").assertDoesNotExist()
+    }
+
+    @Test
+    fun aCurrencyDeclineOffersOnlyDone() {
+        show(Money(1250, USD), ChargeUiState.Result(SaleOutcome.Declined(DeclineReason.CURRENCY_NOT_ACCEPTED)), mode = offline)
+
+        compose.onNodeWithText("Done").assertExists()
+        compose.onNodeWithText("Try again").assertDoesNotExist()
+        compose.onNodeWithText("Change amount").assertDoesNotExist()
+    }
 }

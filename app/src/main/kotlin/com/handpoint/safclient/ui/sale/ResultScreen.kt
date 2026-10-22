@@ -63,6 +63,7 @@ fun ResultContent(
     onPrint: () -> Unit,
     onTryAgain: () -> Unit,
     onDone: () -> Unit,
+    onChangeAmount: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val copy = resultCopy(outcome, amount.currency)
@@ -112,6 +113,10 @@ fun ResultContent(
                         enabled = !printing,
                     )
                     PrimaryButton(text = "Done", onClick = onDone, emphasis = ButtonEmphasis.Accent)
+                }
+                copy.canChangeAmount -> {
+                    PrimaryButton(text = "Change amount", onClick = onChangeAmount, emphasis = ButtonEmphasis.Accent)
+                    SecondaryButton(text = "Done", onClick = onDone)
                 }
                 copy.canTryAgain -> {
                     PrimaryButton(text = "Try again", onClick = onTryAgain, emphasis = ButtonEmphasis.Accent)
@@ -229,5 +234,5 @@ private fun ApprovedPreview() = SafPreviewSurface {
         merchantReceipt = null,
         customerReceipt = null,
     )
-    ResultContent(SaleOutcome.ApprovedOffline(sale), Money(1250, usd), false, {}, {}, {})
+    ResultContent(SaleOutcome.ApprovedOffline(sale), Money(1250, usd), false, {}, {}, {}, {})
 }

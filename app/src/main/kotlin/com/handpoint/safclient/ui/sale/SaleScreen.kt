@@ -70,6 +70,7 @@ fun SaleRoute(viewModel: SaleViewModel, onDone: () -> Unit) {
             onCancel = viewModel::cancel,
             onPrint = viewModel::printReceipt,
             onTryAgain = viewModel::tryAgain,
+            onChangeAmount = viewModel::changeAmount,
             onDone = onDone,
         ),
     )
@@ -84,6 +85,7 @@ class SaleActions(
     val onCancel: () -> Unit = {},
     val onPrint: () -> Unit = {},
     val onTryAgain: () -> Unit = {},
+    val onChangeAmount: () -> Unit = {},
     val onDone: () -> Unit = {},
 )
 
@@ -161,6 +163,7 @@ fun SaleScreen(
                         onPrint = actions.onPrint,
                         onTryAgain = actions.onTryAgain,
                         onDone = actions.onDone,
+                        onChangeAmount = actions.onChangeAmount,
                     )
                 }
             }

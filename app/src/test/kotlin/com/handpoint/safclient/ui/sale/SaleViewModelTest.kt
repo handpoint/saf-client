@@ -227,7 +227,7 @@ class SaleViewModelTest {
         val copy = resultCopy(SaleOutcome.Failed("Terminal busy"), USD)
 
         assertEquals("Sale not completed", copy.title)
-        assertEquals("The sale couldn't be completed.", copy.body)
+        assertEquals("Terminal busy", copy.body) // the SDK's message, when it is readable
         assertTrue(copy.canTryAgain)
     }
 
@@ -236,7 +236,8 @@ class SaleViewModelTest {
         val copy = resultCopy(SaleOutcome.Declined(DeclineReason.CURRENCY_NOT_ACCEPTED), USD)
 
         assertEquals("This terminal doesn't take offline sales in USD. Ask Handpoint to check the terminal's currency.", copy.body)
-        assertTrue(copy.canTryAgain)
+        // Another card would be refused too.
+        assertFalse(copy.canTryAgain)
     }
 
     @Test
@@ -480,6 +481,46 @@ class SaleViewModelTest {
         assertEquals(ChargeUiState.Idle, viewModel.state.value)
         assertEquals(0, online.saleCalls + terminal.saleCalls)
         assertEquals(listOf("Switching between online and offline sales. Try again in a moment."), messages)
+    }
+
+    // --- declines of the amount ------------------------------------------------------------------
+
+    @Test
+    fun `the result copy uses the SDK's message and our own when there is none`() {
+        val message = "This sale is over the offline limit of $1.00 per sale."
+        assertEquals(message, resultCopy(SaleOutcome.Declined(DeclineReason.OVER_SALE_LIMIT, message), USD).body)
+        assertEquals(
+            "This sale is over the terminal's offline limit per sale. Change the amount.",
+            resultCopy(SaleOutcome.Declined(DeclineReason.OVER_SALE_LIMIT), USD).body,
+        )
+        assertEquals("Device busy", resultCopy(SaleOutcome.Failed("Device busy"), USD).body)
+        assertEquals("The sale couldn't be completed.", resultCopy(SaleOutcome.Failed("TEXT_DEFAULT_ERROR_MSG"), USD).body)
+    }
+
+    @Test
+    fun `each decline reason offers its actions`() {
+        val changeAmount = setOf(DeclineReason.OVER_SALE_LIMIT, DeclineReason.INVALID_AMOUNT, DeclineReason.TERMINAL_LIMIT_REACHED)
+        for (reason in DeclineReason.entries) {
+            val copy = resultCopy(SaleOutcome.Declined(reason), USD)
+            assertEquals("change amount for $reason", reason in changeAmount, copy.canChangeAmount)
+            val tryAgain = reason !in changeAmount && reason != DeclineReason.CURRENCY_NOT_ACCEPTED
+            assertEquals("try again for $reason", tryAgain, copy.canTryAgain)
+        }
+    }
+
+    @Test
+    fun `change amount returns to the amount with the amount kept, and try again is ignored`() = runTest(dispatcher) {
+        terminal.saleOutcome = SaleOutcome.Declined(DeclineReason.OVER_SALE_LIMIT, "Over the limit")
+        val viewModel = saleViewModel()
+        viewModel.enter(3, 0, 1, 0, 0)
+        viewModel.charge()
+
+        viewModel.tryAgain()
+        assertTrue(viewModel.state.value is ChargeUiState.Result)
+
+        viewModel.changeAmount()
+        assertEquals(ChargeUiState.Idle, viewModel.state.value)
+        assertEquals(30100L, viewModel.amount.value.minorUnits)
     }
 
     private companion object {

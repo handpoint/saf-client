@@ -73,7 +73,7 @@ private fun DeclineReason.message(currency: Currency): String = when (this) {
         "This terminal has reached its offline limit. Send stored sales, then try again."
     DeclineReason.CARD_EXPIRED -> "The card's chip has expired. Ask for another card."
     DeclineReason.CURRENCY_NOT_ACCEPTED ->
-        "This terminal doesn't take offline sales in ${currency.currencyCode}. Check the currency in Settings."
+        "This terminal doesn't take offline sales in ${currency.currencyCode}. Ask Handpoint to check the terminal's currency."
     DeclineReason.CARD_NOT_ACCEPTED -> "This card isn't accepted."
     DeclineReason.OTHER -> "The sale couldn't be completed."
 }

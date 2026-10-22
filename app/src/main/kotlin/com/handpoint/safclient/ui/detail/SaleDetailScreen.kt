@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -143,8 +144,10 @@ fun SaleDetailScreen(
         },
         bottomBar = {
             if (sale != null) {
+                // With edge-to-edge, a custom bottom bar must keep clear of the navigation bar.
                 Column(
                     Modifier
+                        .navigationBarsPadding()
                         .fillMaxWidth()
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),

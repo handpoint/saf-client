@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -112,8 +113,10 @@ fun SendingScreen(
         },
         bottomBar = {
             if (state is SendingUiState.Done) {
+                // With edge-to-edge, a custom bottom bar must keep clear of the navigation bar.
                 Column(
                     modifier = Modifier
+                        .navigationBarsPadding()
                         .padding(16.dp)
                         .fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),

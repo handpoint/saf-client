@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -115,9 +116,12 @@ fun SaleScreen(
                     fadeIn(tween(220)) togetherWith fadeOut(tween(120))
                 }
             },
+            // The Amount step has its own top bar: mark the insets as used, so it does not pad
+            // for the status bar a second time.
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .consumeWindowInsets(padding),
             label = "chargeState",
         ) { current ->
             when (current) {

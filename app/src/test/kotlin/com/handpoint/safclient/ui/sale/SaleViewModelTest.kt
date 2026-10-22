@@ -216,7 +216,7 @@ class SaleViewModelTest {
     fun `currency decline names the currency`() {
         val copy = resultCopy(SaleOutcome.Declined(DeclineReason.CURRENCY_NOT_ACCEPTED), USD)
 
-        assertEquals("This terminal doesn't take offline sales in USD. Check the currency in Settings.", copy.body)
+        assertEquals("This terminal doesn't take offline sales in USD. Ask Handpoint to check the terminal's currency.", copy.body)
         assertTrue(copy.canTryAgain)
     }
 

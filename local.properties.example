@@ -1,0 +1,5 @@
+# Copy to local.properties (gitignored) and fill in.
+sdk.dir=/path/to/Android/sdk
+handpoint.sharedSecret=replace-me
+# Optional: currency used for Store and Forward sales (default USD)
+#handpoint.safCurrency=USD

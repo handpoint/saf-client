@@ -105,7 +105,13 @@ class SaleDetailViewModel @Inject constructor(
                 ?: DeleteResult.ERROR
             when (result) {
                 // Leave `deleting` on: the screen is about to close.
-                DeleteResult.DELETED, DeleteResult.NOT_ON_TERMINAL -> _deleted.send(Unit)
+                DeleteResult.DELETED -> _deleted.send(Unit)
+                // The sale left the terminal before the delete, so it was most likely charged:
+                // the journal now shows it as sent, and the screen stays to show that.
+                DeleteResult.NOT_ON_TERMINAL -> {
+                    message.value = ALREADY_SENT
+                    deleting.value = false
+                }
                 DeleteResult.ERROR -> {
                     message.value = DELETE_FAILED
                     deleting.value = false
@@ -121,6 +127,7 @@ class SaleDetailViewModel @Inject constructor(
     companion object {
         const val REFRESH_FAILED = "Couldn't reach Handpoint. Try again later."
         const val DELETE_FAILED = "Couldn't delete the sale. Try again."
+        const val ALREADY_SENT = "This sale was already sent to Handpoint and can't be deleted."
         private const val STOP_TIMEOUT_MILLIS = 5_000L
     }
 }

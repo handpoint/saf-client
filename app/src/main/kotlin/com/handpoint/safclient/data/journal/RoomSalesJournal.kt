@@ -30,6 +30,12 @@ class RoomSalesJournal(private val dao: SaleDao) : SalesJournal {
             inProgress = ProcessingStatus.IN_PROGRESS.name,
         )
 
+    override suspend fun markStored(reference: SaleReference) = dao.markStored(
+        reference = reference.value,
+        stored = ProcessingStatus.STORED.name,
+        open = ProcessingStatus.entries.filter { !it.isFinal && it != ProcessingStatus.STORED }.map { it.name },
+    )
+
     override suspend fun updateStatus(reference: SaleReference, status: ProcessingStatus, at: Instant) =
         dao.updateStatus(reference.value, status.name, at.toEpochMilli())
 

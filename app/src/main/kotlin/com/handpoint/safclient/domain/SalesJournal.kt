@@ -20,6 +20,12 @@ interface SalesJournal {
     /** Moves a STORED sale to IN_PROGRESS and sets its sent time. Sales in any other status are left untouched. */
     suspend fun markSent(reference: SaleReference, at: Instant)
 
+    /**
+     * Moves a sale back to STORED and clears its sent time, when its status is IN_PROGRESS or
+     * NOT_FOUND. Final statuses are left untouched. Only call it when the terminal lists the sale.
+     */
+    suspend fun markStored(reference: SaleReference)
+
     suspend fun updateStatus(reference: SaleReference, status: ProcessingStatus, at: Instant)
 
     suspend fun remove(reference: SaleReference)

@@ -33,6 +33,12 @@ class InMemoryJournal(vararg initial: Sale) : SalesJournal {
         else all + (reference to sale.copy(status = ProcessingStatus.IN_PROGRESS, sentAt = at))
     }
 
+    override suspend fun markStored(reference: SaleReference) = sales.update { all ->
+        val sale = all[reference]
+        if (sale == null || sale.status.isFinal || sale.status == ProcessingStatus.STORED) all
+        else all + (reference to sale.copy(status = ProcessingStatus.STORED, sentAt = null))
+    }
+
     override suspend fun updateStatus(reference: SaleReference, status: ProcessingStatus, at: Instant) =
         sales.update { all ->
             val sale = all[reference] ?: return@update all

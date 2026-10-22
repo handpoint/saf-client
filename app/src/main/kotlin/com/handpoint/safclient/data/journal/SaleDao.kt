@@ -25,6 +25,12 @@ interface SaleDao {
     )
     suspend fun markSent(reference: String, atEpochMs: Long, stored: String, inProgress: String)
 
+    @Query(
+        "UPDATE sales SET status = :stored, sentAtEpochMs = NULL " +
+            "WHERE reference = :reference AND status IN (:open)",
+    )
+    suspend fun markStored(reference: String, stored: String, open: List<String>)
+
     @Query("UPDATE sales SET status = :status, statusCheckedAtEpochMs = :atEpochMs WHERE reference = :reference")
     suspend fun updateStatus(reference: String, status: String, atEpochMs: Long)
 

@@ -13,6 +13,10 @@ import javax.inject.Inject
  * Answers can be stale, so the journal never goes backwards: a final status
  * ([ProcessingStatus.isFinal]) never changes, and IN_PROGRESS never goes back to STORED.
  *
+ * The terminal is the authority for STORED (see [ReconcileStoredSales]): a refresh never
+ * moves a sale into STORED, and moves a STORED sale only to a final status. Only the
+ * terminal's list of stored sales moves a sale out of STORED to IN_PROGRESS or NOT_FOUND.
+ *
  * Returns the gateway's answer, or `null` when there is none (then nothing changes).
  */
 class RefreshSaleStatus @Inject constructor(
@@ -23,8 +27,12 @@ class RefreshSaleStatus @Inject constructor(
     suspend operator fun invoke(reference: SaleReference): ProcessingStatus? {
         val status = terminal.processingStatus(reference) ?: return null
         val current = journal.find(reference)?.status ?: return status
-        val wouldRegress = current == ProcessingStatus.IN_PROGRESS && status == ProcessingStatus.STORED
-        if (!current.isFinal && !wouldRegress) {
+        val allowed = when {
+            current.isFinal -> false
+            current == ProcessingStatus.STORED -> status.isFinal
+            else -> status != ProcessingStatus.STORED
+        }
+        if (allowed) {
             journal.updateStatus(reference, status, clock.instant())
         }
         return status

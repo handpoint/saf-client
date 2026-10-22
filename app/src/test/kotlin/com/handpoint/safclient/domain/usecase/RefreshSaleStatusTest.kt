@@ -65,6 +65,39 @@ class RefreshSaleStatusTest {
     }
 
     @Test
+    fun `stored is not moved to in progress or not found`() = runTest {
+        for (answer in listOf(IN_PROGRESS, ProcessingStatus.NOT_FOUND)) {
+            val journal = InMemoryJournal(sale("A", STORED))
+            terminal.statusAnswer = answer
+
+            val status = refresh(journal)(SaleReference("A"))
+
+            assertEquals(answer, status)
+            assertEquals(STORED, journal.status("A"))
+        }
+    }
+
+    @Test
+    fun `stored moves to a final status`() = runTest {
+        val journal = InMemoryJournal(sale("A", STORED))
+        terminal.statusAnswer = SUCCEEDED
+
+        refresh(journal)(SaleReference("A"))
+
+        assertEquals(SUCCEEDED, journal.status("A"))
+    }
+
+    @Test
+    fun `not found is not moved to stored`() = runTest {
+        val journal = InMemoryJournal(sale("A", ProcessingStatus.NOT_FOUND))
+        terminal.statusAnswer = STORED
+
+        refresh(journal)(SaleReference("A"))
+
+        assertEquals(ProcessingStatus.NOT_FOUND, journal.status("A"))
+    }
+
+    @Test
     fun `no answer leaves the journal unchanged`() = runTest {
         val journal = InMemoryJournal(sale("A", IN_PROGRESS))
         terminal.statusAnswer = null

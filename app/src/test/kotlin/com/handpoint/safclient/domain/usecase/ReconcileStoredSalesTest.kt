@@ -2,7 +2,9 @@ package com.handpoint.safclient.domain.usecase
 
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus.IN_PROGRESS
+import com.handpoint.safclient.domain.model.ProcessingStatus.NOT_FOUND
 import com.handpoint.safclient.domain.model.ProcessingStatus.STORED
+import com.handpoint.safclient.domain.model.ProcessingStatus.SUCCEEDED
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.testutil.FakePreferences
@@ -10,17 +12,22 @@ import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
+import com.handpoint.safclient.testutil.MutableClock
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
-import java.time.Clock
+import java.time.Duration
 import java.time.Instant
-import java.time.ZoneOffset
 import java.util.Currency
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ReconcileStoredSalesTest {
-    private val clock = Clock.fixed(Instant.parse("2026-10-22T12:00:00Z"), ZoneOffset.UTC)
+    private val clock = MutableClock(Instant.parse("2026-10-22T12:00:00Z"))
     private val terminal = FakeTerminal()
     private val journal = InMemoryJournal(sale("A"), sale("B"), sale("C"))
     private val settings = FakePreferences(currency = Currency.getInstance("EUR"))
@@ -39,34 +46,87 @@ class ReconcileStoredSalesTest {
     }
 
     @Test
-    fun `returns the terminal total and remembers its currency`() = runTest {
-        terminal.storedSummary = StoredSummary(listOf(SaleReference("A")), Money(1000, USD))
+    fun `returns the terminal summary and remembers its currency`() = runTest {
+        val summary = StoredSummary(listOf(SaleReference("A")), Money(1000, USD))
+        terminal.storedSummary = summary
 
-        val total = reconcile()
+        val result = reconcile()
 
-        assertEquals(Money(1000, USD), total)
+        assertEquals(summary, result)
+        assertEquals(summary, reconcile.lastSummary.value)
         assertEquals(USD, settings.safCurrency.value)
     }
 
     @Test
-    fun `no answer from the terminal changes nothing`() = runTest {
+    fun `no answer from the terminal changes nothing and keeps the last summary`() = runTest {
+        val summary = StoredSummary(listOf(SaleReference("A"), SaleReference("B"), SaleReference("C")), Money(3000, USD))
+        terminal.storedSummary = summary
+        reconcile()
         terminal.storedSummary = null
 
-        val total = reconcile()
+        val result = reconcile()
 
-        assertNull(total)
+        assertNull(result)
+        assertEquals(summary, reconcile.lastSummary.value)
         assertEquals(listOf(STORED, STORED, STORED), listOf("A", "B", "C").map { journal.status(it) })
-        assertEquals(Currency.getInstance("EUR"), settings.safCurrency.value)
     }
 
     @Test
     fun `empty terminal with no total keeps the currency`() = runTest {
         terminal.storedSummary = StoredSummary(emptyList(), null)
 
-        val total = reconcile()
+        reconcile()
 
-        assertNull(total)
         assertEquals(Currency.getInstance("EUR"), settings.safCurrency.value)
         assertEquals(listOf(IN_PROGRESS, IN_PROGRESS, IN_PROGRESS), listOf("A", "B", "C").map { journal.status(it) })
+    }
+
+    @Test
+    fun `a sale recorded while the terminal answers stays stored`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        terminal.storedGate = gate
+        terminal.storedSummary = StoredSummary(listOf(SaleReference("A"), SaleReference("B"), SaleReference("C")), Money(3000, USD))
+        val job = launch { reconcile() }
+        runCurrent() // the terminal snapshot is now being taken
+
+        clock.advance(Duration.ofSeconds(1))
+        journal.record(sale("D").copy(approvedAt = clock.instant()))
+        gate.complete(Unit)
+        job.join()
+
+        assertEquals(STORED, journal.status("D"))
+    }
+
+    @Test
+    fun `sales the terminal still holds go back to stored`() = runTest {
+        val journal = InMemoryJournal(
+            sale("A", IN_PROGRESS).copy(sentAt = Instant.parse("2026-10-22T11:00:00Z")),
+            sale("B", NOT_FOUND),
+            sale("C", SUCCEEDED),
+        )
+        terminal.storedSummary = StoredSummary(listOf("A", "B", "C").map(::SaleReference), Money(3000, USD))
+
+        ReconcileStoredSales(terminal, journal, settings, clock)()
+
+        assertEquals(STORED, journal.status("A"))
+        assertNull(journal.find(SaleReference("A"))?.sentAt)
+        assertEquals(STORED, journal.status("B"))
+        assertEquals(SUCCEEDED, journal.status("C"))
+    }
+
+    @Test
+    fun `a sale sent while the terminal answers is not put back to stored`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        terminal.storedGate = gate
+        terminal.storedSummary = StoredSummary(listOf("A", "B", "C").map(::SaleReference), Money(3000, USD))
+        val job = launch { reconcile() }
+        runCurrent()
+
+        clock.advance(Duration.ofSeconds(1))
+        journal.markSent(SaleReference("A"), clock.instant())
+        gate.complete(Unit)
+        job.join()
+
+        assertEquals(IN_PROGRESS, journal.status("A"))
     }
 }

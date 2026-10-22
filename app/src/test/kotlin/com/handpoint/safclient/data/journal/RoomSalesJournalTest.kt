@@ -91,6 +91,30 @@ class RoomSalesJournalTest {
     }
 
     @Test
+    fun markStoredMovesOpenSalesBackToStored() = runBlocking {
+        journal.record(sale("a", 1_000))
+        journal.markSent(SaleReference("a"), Instant.ofEpochMilli(5_000))
+        journal.record(sale("b", 2_000, ProcessingStatus.NOT_FOUND))
+
+        journal.markStored(SaleReference("a"))
+        journal.markStored(SaleReference("b"))
+
+        val a = journal.find(SaleReference("a"))!!
+        assertEquals(ProcessingStatus.STORED, a.status)
+        assertNull(a.sentAt)
+        assertEquals(ProcessingStatus.STORED, journal.find(SaleReference("b"))!!.status)
+    }
+
+    @Test
+    fun markStoredLeavesFinalStatusesAlone() = runBlocking {
+        journal.record(sale("a", 1_000, ProcessingStatus.SUCCEEDED))
+
+        journal.markStored(SaleReference("a"))
+
+        assertEquals(ProcessingStatus.SUCCEEDED, journal.find(SaleReference("a"))!!.status)
+    }
+
+    @Test
     fun updateStatusSetsStatusAndCheckedAt() = runBlocking {
         journal.record(sale("a", 1_000))
 

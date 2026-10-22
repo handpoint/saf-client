@@ -12,7 +12,9 @@ import javax.inject.Inject
  * When the outcome is unknown (no result in time), the terminal may still have stored the
  * sale. This use case then reconciles the journal with the terminal (see [ReconcileStoredSales]):
  * journal sales the terminal no longer holds are marked sent, and the terminal's currency is
- * adopted. A sale the terminal stored but never reported is not added to the journal.
+ * adopted. A sale the terminal stored but never reported is not added to the journal (the SDK
+ * gives no details for it), but it counts in [ReconcileStoredSales.lastSummary], so Home shows
+ * it as waiting to send.
  *
  * The first call may create the SDK: call it off the main thread.
  */

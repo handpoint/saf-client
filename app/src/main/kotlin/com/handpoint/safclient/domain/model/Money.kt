@@ -21,6 +21,11 @@ data class Money(val minorUnits: Long, val currency: Currency) {
         return Money(minorUnits + other.minorUnits, currency)
     }
 
+    operator fun minus(other: Money): Money {
+        require(currency == other.currency) { "Cannot subtract ${other.currency} from $currency" }
+        return Money(minorUnits - other.minorUnits, currency)
+    }
+
     companion object {
         fun zero(currency: Currency): Money = Money(0L, currency)
     }

@@ -18,6 +18,7 @@ import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.RecordingErrorReporter
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
+import com.handpoint.safclient.testutil.MutableClock
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,11 +36,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.time.Clock
 import java.time.Duration
 import java.time.Instant
-import java.time.ZoneId
-import java.time.ZoneOffset
+import java.util.Currency
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
@@ -83,6 +82,71 @@ class HomeViewModelTest {
         assertEquals(Money(5950, USD), state.pending)
         assertEquals(2, state.pendingCount)
         assertEquals(listOf("A", "B"), state.stored.map { it.reference.value }.sorted())
+    }
+
+    @Test
+    fun `sales only the terminal knows count as waiting`() = runTest(dispatcher) {
+        terminal.storedSummary = StoredSummary(listOf(SaleReference("X"), SaleReference("Y")), Money(3000, USD))
+
+        val (viewModel, _) = homeViewModel(InMemoryJournal())
+
+        val state = viewModel.uiState.value
+        assertEquals(2, state.pendingCount)
+        assertEquals(Money(3000, USD), state.pending)
+        assertTrue(state.canSend)
+        assertEquals(2, state.notInList)
+    }
+
+    @Test
+    fun `terminal sales missing from the journal are counted`() = runTest(dispatcher) {
+        terminal.storedSummary = StoredSummary(listOf("A", "X", "Y").map(::SaleReference), Money(3500, USD))
+
+        val (viewModel, _) = homeViewModel(InMemoryJournal(sale("A", STORED, minorUnits = 500)))
+
+        val state = viewModel.uiState.value
+        assertEquals(3, state.pendingCount)
+        assertEquals(Money(3500, USD), state.pending)
+        assertEquals(listOf("A"), state.stored.map { it.reference.value })
+        assertEquals(2, state.notInList)
+    }
+
+    @Test
+    fun `the journal counts when it holds more than the last terminal answer`() = runTest(dispatcher) {
+        terminal.storedSummary = StoredSummary(listOf(SaleReference("A")), Money(500, USD))
+        val journal = InMemoryJournal(sale("A", STORED, minorUnits = 500))
+        val (viewModel, _) = homeViewModel(journal)
+
+        journal.record(sale("B", STORED, minorUnits = 700).copy(approvedAt = clock.instant()))
+
+        val state = viewModel.uiState.value
+        assertEquals(2, state.pendingCount)
+        assertEquals(Money(1200, USD), state.pending)
+        assertEquals(0, state.notInList)
+    }
+
+    @Test
+    fun `the terminal currency wins when the totals differ in currency`() = runTest(dispatcher) {
+        val eur = Currency.getInstance("EUR")
+        terminal.storedSummary = StoredSummary(listOf(SaleReference("X")), Money(900, eur))
+        val journal = InMemoryJournal()
+        val (viewModel, _) = homeViewModel(journal)
+        journal.record(sale("A", STORED).copy(approvedAt = clock.instant()))
+        journal.record(sale("B", STORED).copy(approvedAt = clock.instant()))
+
+        val state = viewModel.uiState.value
+        assertEquals(Money(900, eur), state.pending)
+        assertEquals(1, state.pendingCount)
+    }
+
+    @Test
+    fun `send now needs a connected terminal`() = runTest(dispatcher) {
+        terminal.storedSummary = StoredSummary(listOf(SaleReference("A")), Money(1000, USD))
+        val (viewModel, _) = homeViewModel(InMemoryJournal(sale("A", STORED)))
+        assertTrue(viewModel.uiState.value.canSend)
+
+        terminal.connectionState.value = TerminalConnection.DISCONNECTED
+
+        assertFalse(viewModel.uiState.value.canSend)
     }
 
     @Test
@@ -249,13 +313,4 @@ class HomeViewModelTest {
         assertTrue(viewModel.uiState.value.isSending)
     }
 
-    private class MutableClock(private var now: Instant) : Clock() {
-        fun advance(by: Duration) {
-            now += by
-        }
-
-        override fun instant(): Instant = now
-        override fun getZone(): ZoneId = ZoneOffset.UTC
-        override fun withZone(zone: ZoneId): Clock = this
-    }
 }

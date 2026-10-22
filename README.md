@@ -35,7 +35,7 @@ Key points:
 - A PAX terminal with Store and Forward enabled by Handpoint.
 - SAF currency: USD. A terminal handles one currency.
 - Your shared secret.
-- Access to the Handpoint Maven repository (URL, user and password from Handpoint).
+- Access to the Handpoint Maven repository (user and password from Handpoint).
 - JDK 17.
 - Android SDK 36.
 
@@ -44,10 +44,12 @@ Key points:
 1. Add the Maven credentials to `~/.gradle/gradle.properties`. Never put them in the project.
 
    ```properties
-   MAVEN_URL=https://maven.example.com/repository/handpoint
-   MAVEN_USER=your-user
-   MAVEN_PASSWORD=your-password
+   MAVEN_URL=http://nexus.handpoint.ninja:8081/repository/public/
+   MAVEN_USER=provided-by-handpoint
+   MAVEN_PASSWORD=provided-by-handpoint
    ```
+
+   The repository uses plain HTTP. `settings.gradle.kts` allows that for this repository only, and asks it only for `com.handpoint` artifacts.
 
 2. Copy `local.properties.example` to `local.properties` (it is gitignored) and fill it in.
 
@@ -59,6 +61,10 @@ Key points:
    ```
 
 The 7.1014.1 SDK needs the shared secret. In this version the factory that works without credentials is disabled. The secret goes into `BuildConfig.SHARED_SECRET` at build time.
+
+### Protecting the shared secret
+
+This app compiles the shared secret into `BuildConfig`. Anyone who has the APK can read it. That is acceptable for a reference app on a test terminal. For production, do not put the secret in the APK: provision it securely, for example from your backend or through TMS, at run time.
 
 ## Build and install
 
@@ -88,9 +94,11 @@ Each item is an SDK fact. The pointer shows where this app handles it.
 - [ ] **A 60 s inactivity timeout, added by the app.** If no SDK event arrives for 60 s, the run ends as a network stop with the progress so far. Sales not reported as sent stay STORED (`SendStoredSales.INACTIVITY_TIMEOUT`).
 - [ ] **Offline decline reasons.** `errorMessage` is translated into the card or device language. Map the untranslated key in `_statusMessage` instead: `PREPAID_CARD`, `EXCEEDED_MAX_AMOUNT_BY_PAN`, `EXCEEDED_MAX_AMOUNT`, `EXPIRED_CARD`, `TEXT_ERROR_CURRENCY`, `TEXT_CARD_NOT_SUPPORTED` (`SdkMappers.kt`, `toDeclineReason`).
 - [ ] **SDK-check rejections have no reference.** When the SDK refuses a sale (for example, wrong currency), `sale` returns `operationStarted = false` and the result arrives in an `endOfTransaction` with a blank reference. The app waits 2 s for it (`HandpointSafTerminal.REJECTION_TIMEOUT`).
-- [ ] **Sale timeout or cancel: outcome unknown.** The app calls `stopCurrentTransaction` and returns `Failed(OUTCOME_UNKNOWN)`. Stopping works only before the card is read, so the terminal may still have stored the sale. Reconcile with `getStoredTransactions`. **Never retry blindly: you can charge the customer twice** (`HandpointSafTerminal.awaitSaleEnd`, `ReconcileStoredSales`).
+- [ ] **Sale timeout or cancel: outcome unknown.** The app calls `stopCurrentTransaction` and returns `Failed(OUTCOME_UNKNOWN)`. Stopping works only before the card is read, so the terminal may still have stored the sale. Reconcile with `getStoredTransactions`. **Never retry blindly: you can charge the customer twice** (`HandpointSafTerminal.awaitSaleEnd`, `ReconcileStoredSales`). An unexpected `FinancialStatus` is also an unknown outcome (`SdkMappers.kt`).
+- [ ] **The terminal is the authority for what is stored.** A sale can be stored on the terminal without its result reaching the app. The SDK gives only its reference, so the app cannot add it to its list. Home counts the terminal's last answer to `getStoredTransactions`, says how many stored sales are not in the app's list, and keeps "Send now" enabled so they are forwarded (`ReconcileStoredSales.lastSummary`, `ui/home/HomeViewModel.kt`).
+- [ ] **Delete only what is still on the terminal.** `deleteStoredTransaction` can answer that the sale is not on the terminal. Then it was most likely forwarded and charged: do not remove it from your records. The app marks it as sent and tells the merchant it cannot be deleted (`DeleteStoredSale.kt`).
 - [ ] **SDK spelling.** The error event is `unexpectedSafTrasnsactionStatusError` ("Trasnsaction"). Keep the typo when you override it (`SdkEventBridge.kt`).
-- [ ] **Status values and the no-regress rule.** Values: `STORED`, `IN_PROGRESS`, `SUCCEEDED`, `FAILED`, `CAPTURED`, `REFUNDED`, `CANCELLED`, `NOT_FOUND`. A final status never changes. `IN_PROGRESS` never goes back to `STORED`, because answers can be stale (`domain/model/ProcessingStatus.kt`, `domain/usecase/RefreshSaleStatus.kt`).
+- [ ] **Status values and the no-regress rule.** Values: `STORED`, `IN_PROGRESS`, `SUCCEEDED`, `FAILED`, `CAPTURED`, `REFUNDED`, `CANCELLED`, `NOT_FOUND`. A final status never changes. A status answer never moves a sale into `STORED`, and moves a `STORED` sale only to a final status, because answers can be stale. Only the terminal's list of stored sales moves a sale into or out of `STORED` (`domain/model/ProcessingStatus.kt`, `domain/usecase/RefreshSaleStatus.kt`, `ReconcileStoredSales`).
 - [ ] **No card brand offline.** The SDK does not return the card brand for offline sales (it is `OTHER`). The app shows the masked number and the entry mode only (`SdkMappers.kt`).
 - [ ] **SAF limits are not exposed.** The SDK does not tell you the terminal limits. Handle declines such as `EXCEEDED_MAX_AMOUNT` when they happen.
 - [ ] **One currency per terminal.** The app reads the currency from the stored total and saves it as a setting (`ReconcileStoredSales`, `data/settings/AppSettings.kt`, `handpoint.safCurrency`).
@@ -118,10 +126,10 @@ The code is in three layers. Dependencies point inwards: `ui` and `data` depend 
 | `TakeSale` | Take a sale and save it in the journal when it is approved offline. |
 | `SendStoredSales` | Run forwarding, mark each sale as sent, reconcile at the end. |
 | `RefreshSaleStatus` | Ask for the processing status and save it. |
-| `ReconcileStoredSales` | Make the journal agree with the terminal. |
-| `DeleteStoredSale` | Delete a stored sale from the terminal. |
+| `ReconcileStoredSales` | Make the journal agree with the terminal, and keep the terminal's last answer. |
+| `DeleteStoredSale` | Delete a stored sale from the terminal. A sale already gone from the terminal is kept and marked sent. |
 
-**The local journal.** The SDK has no history of sales. It lists only what is still stored on the terminal, and a status needs a call per sale. The app keeps its own journal in Room (`data/journal/`) so it can show every sale and its status. The terminal stays the source of truth for what is stored. `ReconcileStoredSales` fixes the journal when they differ.
+**The local journal.** The SDK has no history of sales. It lists only what is still stored on the terminal, and a status needs a call per sale. The app keeps its own journal in Room (`data/journal/`) so it can show every sale and its status. The terminal stays the source of truth for what is stored: the journal never decides on its own that a sale left the terminal, or that a sale is not on it. `ReconcileStoredSales` fixes the journal when they differ. A STORED sale the terminal no longer lists becomes IN_PROGRESS; a sale the terminal still lists goes back to STORED. Sales that change while the terminal answers are left as they are.
 
 ## Tests
 
@@ -145,6 +153,6 @@ No terminal and no network are needed. The tests use a fake SDK (`app/src/test/k
 
 - Sale only. There is no refund or void.
 - No simulated mode yet. You need a real terminal to run the app.
-- If the app is killed in the middle of a sale after the card was read, that sale may not appear in the journal. It may still be stored on the terminal. Reconcile on the next start.
+- If the app is killed in the middle of a sale after the card was read, that sale may not appear in the journal. It may still be stored on the terminal. Home counts it after the next reconcile and "Send now" forwards it, but the app cannot show its details.
 - Robolectric runs on Android SDK 35 (`robolectric.properties`) because it does not support SDK 36 on JDK 17.
 - The guide link in Settings points to a claude.ai artifact (`SAF_GUIDE_URL` in `ui/settings/SettingsScreen.kt`).

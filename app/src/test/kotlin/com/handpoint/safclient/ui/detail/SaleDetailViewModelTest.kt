@@ -8,7 +8,9 @@ import com.handpoint.safclient.domain.model.ProcessingStatus.STORED
 import com.handpoint.safclient.domain.model.ProcessingStatus.SUCCEEDED
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.usecase.DeleteStoredSale
+import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
 import com.handpoint.safclient.domain.usecase.RefreshSaleStatus
+import com.handpoint.safclient.testutil.FakePreferences
 import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
@@ -53,7 +55,12 @@ class SaleDetailViewModelTest {
             savedStateHandle = SavedStateHandle(mapOf(Routes.SALE_REFERENCE to reference)),
             journal = journal,
             refresh = RefreshSaleStatus(terminal, journal, clock),
-            delete = DeleteStoredSale(terminal, journal),
+            delete = DeleteStoredSale(
+                terminal,
+                journal,
+                ReconcileStoredSales(terminal, journal, FakePreferences(), clock),
+                clock,
+            ),
             io = dispatcher,
             errors = errors,
         )
@@ -146,14 +153,19 @@ class SaleDetailViewModelTest {
     }
 
     @Test
-    fun `delete NOT_ON_TERMINAL emits deleted`() = runTest(dispatcher) {
+    fun `delete NOT_ON_TERMINAL stays, keeps the sale as sent and says why`() = runTest(dispatcher) {
         terminal.deleteResult = DeleteResult.NOT_ON_TERMINAL
         val viewModel = detailViewModel(InMemoryJournal(sale("A", STORED)))
 
         viewModel.deleted.test {
             viewModel.deleteSale()
-            awaitItem()
+            expectNoEvents()
         }
+        val state = viewModel.uiState.value
+        assertEquals(SaleDetailViewModel.ALREADY_SENT, state.message)
+        assertEquals(IN_PROGRESS, state.sale?.status)
+        assertFalse(state.canDelete)
+        assertFalse(state.deleting)
     }
 
     @Test

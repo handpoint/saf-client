@@ -35,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -78,6 +79,9 @@ internal enum class HomeFilter { TODAY, STORED }
 
 /** Test tag of the list header (Today / Waiting to send filters). */
 internal const val LIST_HEADER_TAG = "home-list-header"
+
+/** Test tag of the connection chip in the top bar, around its touch target. */
+internal const val CONNECTION_CHIP_TAG = "home-connection-chip"
 
 /** Index of the list header in the Home list: after the hero card and the New sale block. */
 private const val LIST_HEADER_INDEX = 2
@@ -157,18 +161,21 @@ fun HomeScreen(
             ),
         ) {
             item(key = "pending") {
-                PendingCard(
-                    state = state,
-                    onSendNow = onSendNow,
-                    onView = {
-                        filter = HomeFilter.STORED
-                        scope.launch { listState.animateScrollToItem(LIST_HEADER_INDEX) }
-                    },
-                )
+                Column {
+                    PendingCard(
+                        state = state,
+                        onSendNow = onSendNow,
+                        onView = {
+                            filter = HomeFilter.STORED
+                            scope.launch { listState.animateScrollToItem(LIST_HEADER_INDEX) }
+                        },
+                    )
+                    if (state.notInList > 0) NotInList(state.notInList)
+                }
             }
             item(key = "new-sale") { NewSale(state.canTakeSale, onNewSale) }
             item(key = "header") {
-                ListHeader(filter = filter, storedCount = state.pendingCount, onFilter = { filter = it })
+                ListHeader(filter = filter, storedCount = state.stored.size, onFilter = { filter = it })
             }
             when {
                 state.isLoading -> Unit
@@ -232,6 +239,37 @@ private fun Waiting(state: HomeUiState, onSendNow: () -> Unit, onView: () -> Uni
             modifier = Modifier.weight(1f),
         )
     }
+    if (state.connection != TerminalConnection.CONNECTED) {
+        Text(
+            text = "Connect the terminal to send",
+            style = MaterialTheme.typography.bodyMedium,
+            color = LocalContentColor.current.copy(alpha = 0.8f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+        )
+    }
+}
+
+/**
+ * Sales the terminal stores that this app's list does not show (for example a sale stored
+ * after its result was lost). They are counted above and Send now forwards them.
+ */
+@Composable
+private fun NotInList(count: Int) {
+    Text(
+        text = if (count == 1) {
+            "1 sale on this terminal isn't in this app's list."
+        } else {
+            "$count sales on this terminal aren't in this app's list."
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        color = SafTheme.colors.textMuted,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+    )
 }
 
 @Composable
@@ -304,11 +342,14 @@ private fun NewSale(enabled: Boolean, onNewSale: () -> Unit) {
 private fun ConnectionStatus(connection: TerminalConnection, onRetry: () -> Unit) {
     val canRetry = connection == TerminalConnection.DISCONNECTED || connection == TerminalConnection.NOT_CONFIGURED
     val modifier = if (canRetry) {
+        // A tappable chip gets the 48 dp minimum touch target.
         Modifier
+            .testTag(CONNECTION_CHIP_TAG)
+            .minimumInteractiveComponentSize()
             .clip(PillShape)
             .clickable(role = Role.Button, onClickLabel = "Connect the terminal", onClick = onRetry)
     } else {
-        Modifier
+        Modifier.testTag(CONNECTION_CHIP_TAG)
     }
     ConnectionChip(connection, modifier)
 }

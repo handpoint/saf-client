@@ -15,7 +15,9 @@ import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.USD
 import com.handpoint.safclient.testutil.InMemoryJournal.Companion.sale
 import com.handpoint.safclient.ui.theme.SafTheme
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,6 +77,33 @@ class HomeScreenTest {
     }
 
     @Test
+    fun sendNowNeedsAConnectedTerminal() {
+        show(waiting.copy(connection = TerminalConnection.DISCONNECTED))
+        compose.onNodeWithText("Send now").assertIsNotEnabled()
+        compose.onNodeWithText("Connect the terminal to send").assertExists()
+    }
+
+    @Test
+    fun salesMissingFromTheListAreExplained() {
+        show(waiting.copy(pendingCount = 3, notInList = 2))
+        compose.onNodeWithText("3 sales stored on this terminal").assertExists()
+        compose.onNodeWithText("2 sales on this terminal aren't in this app's list.").assertExists()
+        compose.onNodeWithText("Send now").assertIsEnabled()
+    }
+
+    @Test
+    fun oneSaleMissingFromTheListIsExplained() {
+        show(waiting.copy(pendingCount = 2, notInList = 1))
+        compose.onNodeWithText("1 sale on this terminal isn't in this app's list.").assertExists()
+    }
+
+    @Test
+    fun noExplanationWhenTheListIsComplete() {
+        show(waiting)
+        compose.onNodeWithText("in this app's list", substring = true).assertDoesNotExist()
+    }
+
+    @Test
     fun nothingPendingSaysAllSalesSent() {
         show(waiting.copy(pending = null, pendingCount = 0, stored = emptyList()))
         compose.onNodeWithText("All sales sent").assertExists()
@@ -113,6 +142,15 @@ class HomeScreenTest {
         show(waiting.copy(connection = TerminalConnection.DISCONNECTED))
         compose.onNodeWithText("Disconnected").performClick()
         assertEquals(1, retryClicks)
+    }
+
+    @Test
+    fun theChipHasAFullTouchTargetWhenItCanBeTapped() {
+        show(waiting.copy(connection = TerminalConnection.DISCONNECTED))
+        // The chip's semantics cover the pill; the layout around it reserves the touch target.
+        val chip = compose.onNodeWithTag(CONNECTION_CHIP_TAG, useUnmergedTree = true).fetchSemanticsNode()
+        val minimum = with(compose.density) { 48.dp.roundToPx() }
+        assertTrue(chip.layoutInfo.height >= minimum && chip.layoutInfo.width >= minimum)
     }
 
     @Test

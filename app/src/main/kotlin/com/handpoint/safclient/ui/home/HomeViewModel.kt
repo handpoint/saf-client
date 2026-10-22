@@ -11,6 +11,7 @@ import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
+import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
 import com.handpoint.safclient.domain.usecase.RefreshSaleStatus
@@ -35,9 +36,14 @@ import javax.inject.Inject
 data class HomeUiState(
     val merchantName: String = "",
     val connection: TerminalConnection = TerminalConnection.DISCONNECTED,
-    /** Total of the sales waiting to be sent; `null` when there are none. */
+    /**
+     * Total of the sales waiting to be sent; `null` when there are none. Like [pendingCount],
+     * it comes from the terminal's last answer when that is known (see [HomeViewModel]).
+     */
     val pending: Money? = null,
     val pendingCount: Int = 0,
+    /** Sales the terminal stores that are not in [stored] (the journal never got them). */
+    val notInList: Int = 0,
     /** Sales approved today (local date), newest first. */
     val today: List<Sale> = emptyList(),
     /** Every sale waiting to be sent, newest first, whatever the day. */
@@ -48,11 +54,16 @@ data class HomeUiState(
     val isLoading: Boolean = true,
 ) {
     val canTakeSale: Boolean get() = connection == TerminalConnection.CONNECTED
-    val canSend: Boolean get() = !isSending && pendingCount > 0
+    val canSend: Boolean get() = !isSending && pendingCount > 0 && connection == TerminalConnection.CONNECTED
 }
 
 /**
  * Home: what is waiting to be sent, and today's sales with their status.
+ *
+ * The terminal is the authority for what is waiting to be sent. The hero card counts the
+ * terminal's last answer ([ReconcileStoredSales.lastSummary]) when it is known, so a sale the
+ * terminal stored without reporting it still shows and can be sent. The journal counts when it
+ * holds more (a sale taken after that answer), unless its total is in another currency.
  *
  * When the screen opens it connects the terminal (unless it is connected already), makes the
  * journal agree with the terminal, and then asks the gateway once about today's sales whose
@@ -77,13 +88,19 @@ class HomeViewModel @Inject constructor(
         settings.merchantName,
         terminal.connection,
         sendStoredSales.isRunning,
-    ) { sales, merchantName, connection, isSending ->
+        reconcile.lastSummary,
+    ) { sales, merchantName, connection, isSending, onTerminal ->
         val stored = sales.filter { it.status == ProcessingStatus.STORED }.sortedByDescending { it.approvedAt }
+        val waiting = waitingToSend(stored, onTerminal)
         HomeUiState(
             merchantName = merchantName,
             connection = connection,
-            pending = stored.totalOrNull(),
-            pendingCount = stored.size,
+            pending = waiting.total,
+            pendingCount = waiting.count,
+            notInList = onTerminal?.let { summary ->
+                val listed = stored.map { it.reference }.toSet()
+                summary.references.count { it !in listed }
+            } ?: 0,
             today = sales.filter { it.approvedAt.isToday() }.sortedByDescending { it.approvedAt },
             stored = stored,
             isSending = isSending,
@@ -163,6 +180,22 @@ class HomeViewModel @Inject constructor(
         private const val STOP_TIMEOUT_MILLIS = 5_000L
         private val OPEN_STATUSES = setOf(ProcessingStatus.IN_PROGRESS, ProcessingStatus.NOT_FOUND)
     }
+}
+
+private class Waiting(val count: Int, val total: Money?)
+
+/**
+ * What is waiting to be sent: the terminal's answer when it is known, unless the journal holds
+ * more sales in the same currency (sales taken after that answer). Totals in different
+ * currencies mean the journal is out of date, so the terminal wins.
+ */
+private fun waitingToSend(stored: List<Sale>, onTerminal: StoredSummary?): Waiting {
+    val journal = Waiting(stored.size, stored.totalOrNull())
+    if (onTerminal == null) return journal
+    val terminal = Waiting(onTerminal.references.size, onTerminal.total)
+    val otherCurrency = journal.total != null && onTerminal.total != null &&
+        journal.total.currency != onTerminal.total.currency
+    return if (terminal.count >= journal.count || otherCurrency) terminal else journal
 }
 
 /**

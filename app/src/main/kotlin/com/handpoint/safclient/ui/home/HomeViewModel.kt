@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.handpoint.safclient.di.IoDispatcher
 import com.handpoint.safclient.domain.AppPreferences
 import com.handpoint.safclient.domain.ErrorReporter
+import com.handpoint.safclient.domain.reportingErrors
 import com.handpoint.safclient.domain.SalesJournal
 import com.handpoint.safclient.domain.StoreAndForwardTerminal
 import com.handpoint.safclient.domain.model.Money
@@ -15,7 +16,6 @@ import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
 import com.handpoint.safclient.domain.usecase.RefreshSaleStatus
 import com.handpoint.safclient.domain.usecase.SendStoredSales
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
@@ -136,37 +136,25 @@ class HomeViewModel @Inject constructor(
         if (terminal.connection.value != TerminalConnection.CONNECTED) {
             // The first connect() creates the SDK, which is heavy and can fail: keep it off the
             // main thread, and on failure leave the chip showing the terminal is not connected.
-            reportingErrors("connect") { withContext(io) { terminal.connect() } }
+            errors.reportingErrors("connect") { withContext(io) { terminal.connect() } }
         }
     }
 
+    // Connect, reconcile and refresh are best effort here: when they fail, the error is
+    // reported, Home keeps showing what the journal holds, and the next resume (or a tap on
+    // the connection chip) tries again.
     private suspend fun reconcileNow() {
-        reportingErrors("reconcile") { withContext(io) { reconcile() } }
+        errors.reportingErrors("reconcile") { withContext(io) { reconcile() } }
     }
 
     /** Asks the gateway about today's sales that were sent but have no final answer yet. */
     private suspend fun refreshOpenStatuses(journal: SalesJournal) {
         journal.observeAll().first()
             .filter { it.status in OPEN_STATUSES && it.approvedAt.isToday() }
-            .forEach { sale -> reportingErrors("refresh status") { withContext(io) { refresh(sale.reference) } } }
+            .forEach { sale -> errors.reportingErrors("refresh status") { withContext(io) { refresh(sale.reference) } } }
     }
 
     private fun Instant.isToday(): Boolean = atZone(clock.zone).toLocalDate() == LocalDate.now(clock)
-
-    /**
-     * Connect, reconcile and refresh are best effort here: when they fail, the error is
-     * reported, Home keeps showing what the journal holds, and the next resume (or a tap on
-     * the connection chip) tries again.
-     */
-    private inline fun reportingErrors(where: String, block: () -> Unit) {
-        try {
-            block()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            errors.report(where, e)
-        }
-    }
 
     companion object {
         /** Shortest time between two reconciles caused by the screen coming back. */

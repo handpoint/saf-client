@@ -42,6 +42,12 @@ class FakeTerminal : StoreAndForwardTerminal {
     /** Thrown by [connect] when set, as when the SDK cannot be created. */
     var connectError: Exception? = null
 
+    /** When set, [processingStatus] waits for it before it answers, to hold a refresh mid-way. */
+    var statusGate: CompletableDeferred<Unit>? = null
+
+    /** Thrown by [processingStatus] when set. */
+    var statusError: Exception? = null
+
     /** When set, [sale] waits for it before it answers, to hold a sale in progress. */
     var saleGate: CompletableDeferred<Unit>? = null
 
@@ -93,7 +99,14 @@ class FakeTerminal : StoreAndForwardTerminal {
         return true
     }
 
-    override fun disconnect(): Boolean = true
+    var disconnectCalls = 0
+        private set
+
+    override fun disconnect(): Boolean {
+        disconnectCalls++
+        connectionState.value = TerminalConnection.DISCONNECTED
+        return true
+    }
 
     override suspend fun sale(amount: Money): SaleOutcome {
         saleCalls++
@@ -122,6 +135,8 @@ class FakeTerminal : StoreAndForwardTerminal {
 
     override suspend fun processingStatus(reference: SaleReference): ProcessingStatus? {
         statusRequests += reference
+        statusGate?.await()
+        statusError?.let { throw it }
         return statusAnswer
     }
 

@@ -8,6 +8,7 @@ import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.StoredSummary
+import com.handpoint.safclient.domain.model.TerminalConnection
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,6 +55,9 @@ class ReconcileStoredSales @Inject constructor(
      * changes and [lastSummary] keeps the previous answer).
      */
     suspend operator fun invoke(): StoredSummary? {
+        // Until the SDK has finished its set-up, its answer carries the built-in default
+        // currency (GBP), not the terminal's configuration: ask only once it is connected.
+        if (terminal.connection.value != TerminalConnection.CONNECTED) return null
         val snapshotStart = clock.instant()
         val stored = terminal.storedOnTerminal() ?: return null
         val onTerminal = stored.references.toSet()

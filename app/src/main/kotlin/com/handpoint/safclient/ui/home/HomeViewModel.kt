@@ -22,6 +22,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -118,12 +119,21 @@ class HomeViewModel @Inject constructor(
     private var connecting: Job = connectInBackground()
 
     init {
+        // connect() returns before the SDK has finished its set-up, and the terminal's answer
+        // is only right once it is connected. So reconcile each time the terminal becomes
+        // CONNECTED: at opening, and again after it reconnects.
         viewModelScope.launch {
             connecting.join()
-            reconcileNow()
-            // The throttle counts from here, so the resume that follows the opening is skipped.
-            lastReconcileAt = clock.instant()
-            refreshOpenStatuses(journal)
+            var opening = true
+            terminal.connection.filter { it == TerminalConnection.CONNECTED }.collect {
+                reconcileNow()
+                if (opening) {
+                    opening = false
+                    // The throttle counts from here, so the resume that follows the opening is skipped.
+                    lastReconcileAt = clock.instant()
+                    refreshOpenStatuses(journal)
+                }
+            }
         }
     }
 
@@ -143,10 +153,6 @@ class HomeViewModel @Inject constructor(
     fun retryConnection() {
         if (connecting.isActive || terminal.connection.value == TerminalConnection.CONNECTED) return
         connecting = connectInBackground()
-        viewModelScope.launch {
-            connecting.join()
-            reconcileNow()
-        }
     }
 
     private fun connectInBackground(): Job = viewModelScope.launch {

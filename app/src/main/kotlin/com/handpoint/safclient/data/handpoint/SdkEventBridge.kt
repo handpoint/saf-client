@@ -110,13 +110,15 @@ internal class SdkEventBridge :
 
     // --- Events.StoredTransactionsEvent --------------------------------------------------
 
+    // Despite its name, `totalAmount` is the Store and Forward batch limit (maxAmountPerBatch).
+    // The amount of the sales stored on the terminal is `amountProcessed`.
     override fun transactionsStoredList(
         transactionReferences: List<TransactionReference>,
         currency: Currency,
         totalAmount: BigInteger,
         amountProcessed: BigInteger,
     ) {
-        val total = currency.toJavaCurrencyOrNull()?.let { Money(totalAmount.toLong(), it) }
+        val total = currency.toJavaCurrencyOrNull()?.let { Money(amountProcessed.toLong(), it) }
         storedSummaries.tryEmit(StoredSummary(transactionReferences.map { it.toSaleReference() }, total))
     }
 

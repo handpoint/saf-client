@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -216,13 +217,13 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `a failing connect is reported and Home still reconciles`() = runTest(dispatcher) {
+    fun `a failing connect is reported and Home waits for the terminal before reconciling`() = runTest(dispatcher) {
         terminal.connectionState.value = TerminalConnection.DISCONNECTED
         val failure = IllegalStateException("SDK cannot be created")
         terminal.connectError = failure
         val (viewModel, _) = homeViewModel(InMemoryJournal())
 
-        assertEquals(1, terminal.storedCalls)
+        assertEquals(0, terminal.storedCalls)
         assertEquals(TerminalConnection.DISCONNECTED, viewModel.uiState.value.connection)
         assertFalse(viewModel.uiState.value.canTakeSale)
         assertEquals(listOf("connect" to failure.message), errors.summary())
@@ -248,11 +249,25 @@ class HomeViewModelTest {
         viewModel.retryConnection()
 
         assertEquals(2, terminal.connectCalls)
-        assertEquals(2, terminal.storedCalls)
+        assertEquals(1, terminal.storedCalls)
         assertEquals(TerminalConnection.CONNECTED, viewModel.uiState.value.connection)
 
         viewModel.retryConnection() // already connected: nothing to do
         assertEquals(2, terminal.connectCalls)
+    }
+
+    @Test
+    fun `Home reconciles when the terminal becomes connected, not before`() = runTest(dispatcher) {
+        // connect() returns while the SDK is still setting up; it reports CONNECTED later.
+        terminal.connectionState.value = TerminalConnection.CONNECTING
+        terminal.connectError = IllegalStateException("still setting up")
+        homeViewModel(InMemoryJournal())
+        assertEquals(0, terminal.storedCalls)
+
+        terminal.connectionState.value = TerminalConnection.CONNECTED
+        runCurrent()
+
+        assertEquals(1, terminal.storedCalls)
     }
 
     @Test

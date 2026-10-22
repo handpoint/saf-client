@@ -270,7 +270,7 @@ class HandpointSafTerminalTest {
     // --- stored sales and forwarding ---------------------------------------------------------
 
     @Test
-    fun `stored on terminal returns references and total from the stored list`() = runTest {
+    fun `stored on terminal returns references and the stored total, not the batch limit`() = runTest {
         val terminal = newTerminal()
         terminal.connect()
         val references = listOf(TransactionReference(SALE_REFERENCE), TransactionReference(OTHER_REFERENCE))
@@ -278,7 +278,7 @@ class HandpointSafTerminalTest {
         val summary = async { terminal.storedOnTerminal() }
         runCurrent()
         fake.fire<Events.StoredTransactionsEvent> {
-            it.transactionsStoredList(references, SdkCurrency.USD, BigInteger.valueOf(8450), BigInteger.ZERO)
+            it.transactionsStoredList(references, SdkCurrency.USD, BigInteger.valueOf(100_000), BigInteger.valueOf(8450))
         }
 
         assertEquals(

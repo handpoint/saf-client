@@ -7,6 +7,7 @@ import com.handpoint.safclient.domain.model.ProcessingStatus.STORED
 import com.handpoint.safclient.domain.model.ProcessingStatus.SUCCEEDED
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.StoredSummary
+import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.testutil.FakePreferences
 import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal
@@ -55,6 +56,22 @@ class ReconcileStoredSalesTest {
         assertEquals(summary, result)
         assertEquals(summary, reconcile.lastSummary.value)
         assertEquals(USD, settings.safCurrency.value)
+    }
+
+    @Test
+    fun `nothing is asked or changed until the terminal is connected`() = runTest {
+        // Before the SDK finishes its set-up, its stored list carries the built-in default
+        // currency (GBP), not the one configured in TMS.
+        terminal.connectionState.value = TerminalConnection.CONNECTING
+        terminal.storedSummary = StoredSummary(emptyList(), Money(0, Currency.getInstance("GBP")))
+
+        val result = reconcile()
+
+        assertNull(result)
+        assertEquals(0, terminal.storedCalls)
+        assertNull(reconcile.lastSummary.value)
+        assertEquals(Currency.getInstance("EUR"), settings.safCurrency.value)
+        assertEquals(listOf(STORED, STORED, STORED), listOf("A", "B", "C").map { journal.status(it) })
     }
 
     @Test

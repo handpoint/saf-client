@@ -64,6 +64,8 @@ internal class SdkEventBridge :
     // --- Events.SmartposRequired ---------------------------------------------------------
 
     override fun connectionStatusChanged(status: ConnectionStatus, device: Device) {
+        // Cloud* statuses describe the Handpoint Cloud link, not the payment terminal.
+        if (status.name.startsWith("Cloud")) return
         connection.value = status.toTerminalConnection()
     }
 

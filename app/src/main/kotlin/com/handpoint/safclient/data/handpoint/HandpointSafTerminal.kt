@@ -53,7 +53,10 @@ import kotlin.time.Duration.Companion.seconds
  *    `registerEventsDelegate`: that registration is the one that receives the events
  *    (registering the same object twice is harmless). Call [connect] (`start()`); [connection]
  *    shows the result.
- * 2. **Sale.** [sale] calls `sale(amount, currency, SaleOptions())`. The SDK makes the
+ * 2. **Sale.** [sale] calls `sale(amount, currency, SaleOptions(checkDuplicates = false))`.
+ *    Always turn the duplicate check off: the gateway runs it when the sale is forwarded,
+ *    with no cardholder to confirm a retry, so a sale it flags is declined for good. The
+ *    SDK still sends the check by default (fix requested in SDKS-447). The SDK makes the
  *    transaction reference (a UUID) and returns it in `OperationStartResult`. The sale ends with
  *    `endOfTransaction` for that reference. An offline approval has
  *    `finStatus = AUTHORISED_DEFERRED`: the sale is now stored on the terminal. Every sale
@@ -180,7 +183,7 @@ class HandpointSafTerminal(
             val start = api.sale(
                 BigInteger.valueOf(amount.minorUnits),
                 amount.currency.toSdkCurrency(),
-                SaleOptions(),
+                SaleOptions(checkDuplicates = false),
             )
             if (start.operationStarted) {
                 awaitSaleEnd(api, start.transactionReference, amount, results)

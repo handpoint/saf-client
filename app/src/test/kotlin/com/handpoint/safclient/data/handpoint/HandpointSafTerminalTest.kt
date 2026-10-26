@@ -209,6 +209,19 @@ class HandpointSafTerminalTest {
     }
 
     @Test
+    fun `sale is stored with the duplicate check off`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        fake.duringSale = {
+            fire<Events.EndOfTransaction> { it.endOfTransaction(approvedResult(SALE_REFERENCE), DEVICE) }
+        }
+
+        terminal.sale(amount)
+
+        assertEquals(false, fake.lastSaleOptions?.checkDuplicates)
+    }
+
+    @Test
     fun `sale result delivered before the SDK call returns is not missed`() = runTest {
         val terminal = newTerminal()
         terminal.connect()

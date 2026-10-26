@@ -54,8 +54,12 @@ class FakeSafApi : StoreAndForwardPaymentsApi {
         return true
     }
 
+    /** The options of the last [sale]. */
+    var lastSaleOptions: SaleOptions? = null
+
     override fun sale(amount: BigInteger, currency: Currency, options: SaleOptions): OperationStartResult {
         calls += "sale($amount, ${currency.alpha})"
+        lastSaleOptions = options
         duringSale()
         return saleStart
     }

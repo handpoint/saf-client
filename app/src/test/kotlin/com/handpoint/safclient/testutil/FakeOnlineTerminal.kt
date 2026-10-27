@@ -4,6 +4,7 @@ import com.handpoint.safclient.domain.OnlineTerminal
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.SaleOutcome
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.model.TerminalConnection
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
@@ -73,7 +74,11 @@ class FakeOnlineTerminal : OnlineTerminal {
         return true
     }
 
-    override suspend fun sale(amount: Money): SaleOutcome {
+    /** Surcharges passed to [sale], in call order (`null` for a sale without one). */
+    val saleSurcharges = mutableListOf<SaleSurcharge?>()
+
+    override suspend fun sale(amount: Money, surcharge: SaleSurcharge?): SaleOutcome {
+        saleSurcharges += surcharge
         saleCalls++
         saleGate?.await()
         return saleOutcome

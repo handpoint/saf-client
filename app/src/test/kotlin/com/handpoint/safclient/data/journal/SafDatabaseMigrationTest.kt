@@ -41,7 +41,7 @@ class SafDatabaseMigrationTest {
         createVersion1Database()
 
         val db = Room.databaseBuilder(context, SafDatabase::class.java, name)
-            .addMigrations(SafDatabase.MIGRATION_1_2)
+            .addMigrations(SafDatabase.MIGRATION_1_2, SafDatabase.MIGRATION_2_3)
             .allowMainThreadQueries()
             .build()
         try {

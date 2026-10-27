@@ -1,0 +1,117 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "b343b9640a1f70f6d52476f00ddefdb4",
+    "entities": [
+      {
+        "tableName": "sales",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`reference` TEXT NOT NULL, `amountMinor` INTEGER NOT NULL, `currencyCode` TEXT NOT NULL, `maskedCard` TEXT, `entryMode` TEXT NOT NULL, `approvedAtEpochMs` INTEGER NOT NULL, `sentAtEpochMs` INTEGER, `status` TEXT NOT NULL, `statusCheckedAtEpochMs` INTEGER, `merchantReceipt` TEXT, `customerReceipt` TEXT, `channel` TEXT NOT NULL DEFAULT 'OFFLINE', `surchargePercent` TEXT DEFAULT NULL, `surchargeSentMinor` INTEGER DEFAULT NULL, `surchargeApplied` INTEGER DEFAULT NULL, `surchargeReason` TEXT DEFAULT NULL, PRIMARY KEY(`reference`))",
+        "fields": [
+          {
+            "fieldPath": "reference",
+            "columnName": "reference",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "amountMinor",
+            "columnName": "amountMinor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "currencyCode",
+            "columnName": "currencyCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maskedCard",
+            "columnName": "maskedCard",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "entryMode",
+            "columnName": "entryMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "approvedAtEpochMs",
+            "columnName": "approvedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sentAtEpochMs",
+            "columnName": "sentAtEpochMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "statusCheckedAtEpochMs",
+            "columnName": "statusCheckedAtEpochMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "merchantReceipt",
+            "columnName": "merchantReceipt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "customerReceipt",
+            "columnName": "customerReceipt",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "channel",
+            "columnName": "channel",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'OFFLINE'"
+          },
+          {
+            "fieldPath": "surchargePercent",
+            "columnName": "surchargePercent",
+            "affinity": "TEXT",
+            "defaultValue": "NULL"
+          },
+          {
+            "fieldPath": "surchargeSentMinor",
+            "columnName": "surchargeSentMinor",
+            "affinity": "INTEGER",
+            "defaultValue": "NULL"
+          },
+          {
+            "fieldPath": "surchargeApplied",
+            "columnName": "surchargeApplied",
+            "affinity": "INTEGER",
+            "defaultValue": "NULL"
+          },
+          {
+            "fieldPath": "surchargeReason",
+            "columnName": "surchargeReason",
+            "affinity": "TEXT",
+            "defaultValue": "NULL"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "reference"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b343b9640a1f70f6d52476f00ddefdb4')"
+    ]
+  }
+}

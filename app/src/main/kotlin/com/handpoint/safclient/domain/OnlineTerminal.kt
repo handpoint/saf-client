@@ -2,6 +2,7 @@ package com.handpoint.safclient.domain
 
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.SaleOutcome
+import com.handpoint.safclient.domain.model.SaleSurcharge
 
 /**
  * The terminal's online API: Handpoint approves or declines each sale at once. Nothing is
@@ -15,7 +16,8 @@ import com.handpoint.safclient.domain.model.SaleOutcome
 interface OnlineTerminal : PaymentTerminal {
 
     /**
-     * Takes a sale and waits for its end.
+     * Takes a sale and waits for its end. [amount] is the base amount; a [surcharge] is sent
+     * next to it (`SaleOptions.surchargeAmount`), and the gateway decides whether to apply it.
      *
      * - Approved: [SaleOutcome.ApprovedOnline]; the card has been charged.
      * - Declined: [SaleOutcome.DeclinedOnline] with the SDK's message.
@@ -29,7 +31,7 @@ interface OnlineTerminal : PaymentTerminal {
      * **Outcome unknown** means the card may have been charged: do not charge again before you
      * know.
      */
-    suspend fun sale(amount: Money): SaleOutcome
+    suspend fun sale(amount: Money, surcharge: SaleSurcharge? = null): SaleOutcome
 
     companion object {
         /** Message of the [SaleOutcome.Failed] returned when an online sale's outcome is unknown. */

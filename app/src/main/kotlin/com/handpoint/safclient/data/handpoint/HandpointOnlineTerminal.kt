@@ -9,6 +9,7 @@ import com.handpoint.safclient.domain.OnlineTerminal
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.SaleOutcome
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.model.TerminalConnection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -97,16 +98,16 @@ class HandpointOnlineTerminal(
         return hapi.connect(device)
     }
 
-    override suspend fun sale(amount: Money): SaleOutcome {
+    override suspend fun sale(amount: Money, surcharge: SaleSurcharge?): SaleOutcome {
         val hapi = api ?: return SaleOutcome.Failed(NOT_ACTIVE)
         return listenTo(bridge.transactionResults) { results ->
             val start = hapi.sale(
                 BigInteger.valueOf(amount.minorUnits),
                 amount.currency.toSdkCurrency(),
-                SaleOptions(),
+                SaleOptions().withSurcharge(surcharge),
             )
             if (start.operationStarted) {
-                awaitSaleEnd(hapi, start.transactionReference, amount, results)
+                awaitSaleEnd(hapi, start.transactionReference, amount, surcharge, results)
             } else {
                 rejectionOutcome(start.errorMessage, amount, results)
             }
@@ -122,6 +123,7 @@ class HandpointOnlineTerminal(
         hapi: Hapi,
         reference: String,
         amount: Money,
+        surcharge: SaleSurcharge?,
         results: Flow<TransactionResult>,
     ): SaleOutcome {
         var ended = false
@@ -130,7 +132,7 @@ class HandpointOnlineTerminal(
                 results.first { it.transactionReference == reference }
             }
             ended = result != null
-            return result?.toOnlineOutcome(amount, clock.instant())
+            return result?.toOnlineOutcome(amount, clock.instant(), surcharge)
                 ?: SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN, reference.toReferenceOrNull())
         } finally {
             // Runs on timeout and on cancellation; a CancellationException still propagates.

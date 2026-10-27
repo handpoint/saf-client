@@ -28,6 +28,7 @@ import com.handpoint.safclient.domain.model.EntryMode
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
+import com.handpoint.safclient.domain.model.total
 import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.ui.theme.PillShape
@@ -55,7 +56,7 @@ fun SaleRow(
     modifier: Modifier = Modifier,
     zone: ZoneId = ZoneId.systemDefault(),
 ) {
-    val amount = sale.amount.format()
+    val amount = sale.total.format()
     val card = sale.maskedCard ?: "Card"
     val time = TimeFormat.format(sale.approvedAt.atZone(zone))
     val status = sale.status.label()
@@ -75,7 +76,7 @@ fun SaleRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            AmountText(sale.amount, SafTheme.amounts.row)
+            AmountText(sale.total, SafTheme.amounts.row)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "$card · $time",

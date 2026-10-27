@@ -7,6 +7,7 @@ import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.model.StoredSummary
 import kotlinx.coroutines.flow.SharedFlow
 
@@ -40,7 +41,8 @@ interface StoreAndForwardTerminal : PaymentTerminal {
     override fun disconnect(): Boolean
 
     /**
-     * Takes a sale and waits for its end. Every sale through this API is stored on the
+     * Takes a sale and waits for its end. [amount] is the base amount; a [surcharge] is sent
+     * next to it (`SaleOptions.surchargeAmount`) and stored with the sale on the terminal. Every sale through this API is stored on the
      * terminal; an approval is [SaleOutcome.ApprovedOffline].
      *
      * When the SDK does not start the sale, returns [SaleOutcome.Declined] if the SDK gave a
@@ -53,7 +55,7 @@ interface StoreAndForwardTerminal : PaymentTerminal {
      * [storedOnTerminal] to reconcile before the merchant tries again, or the card can be
      * charged twice.
      */
-    suspend fun sale(amount: Money): SaleOutcome
+    suspend fun sale(amount: Money, surcharge: SaleSurcharge? = null): SaleOutcome
 
     /**
      * Sales still stored on the terminal (not yet forwarded) and their total.

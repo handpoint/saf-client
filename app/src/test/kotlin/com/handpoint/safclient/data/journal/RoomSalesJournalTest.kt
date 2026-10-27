@@ -8,6 +8,7 @@ import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import java.time.Instant
 import java.util.Currency
 import kotlinx.coroutines.flow.first
@@ -162,5 +163,22 @@ class RoomSalesJournalTest {
         journal.markStored(SaleReference("U"))
 
         assertEquals(unconfirmed, journal.find(SaleReference("U")))
+    }
+
+    @Test
+    fun keepsTheSurchargeOfASale() = runBlocking {
+        val surcharge = SaleSurcharge(
+            percent = java.math.BigDecimal("2.5"),
+            sent = Money(31, Currency.getInstance("USD")),
+            applied = false,
+            reason = "Debit card",
+        )
+        journal.record(sale("with", 1_000).copy(surcharge = surcharge))
+        journal.record(sale("without", 2_000))
+        journal.record(sale("not-reported", 3_000).copy(surcharge = surcharge.copy(applied = null, reason = null)))
+
+        assertEquals(surcharge, journal.find(SaleReference("with"))?.surcharge)
+        assertEquals(null, journal.find(SaleReference("without"))?.surcharge)
+        assertEquals(null, journal.find(SaleReference("not-reported"))?.surcharge?.applied)
     }
 }

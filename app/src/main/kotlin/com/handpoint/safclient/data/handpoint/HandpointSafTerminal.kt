@@ -13,6 +13,7 @@ import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.model.TerminalConnection
 import kotlinx.coroutines.flow.Flow
@@ -53,7 +54,8 @@ import kotlin.time.Duration.Companion.seconds
  *    `registerEventsDelegate`: that registration is the one that receives the events
  *    (registering the same object twice is harmless). Call [connect] (`start()`); [connection]
  *    shows the result.
- * 2. **Sale.** [sale] calls `sale(amount, currency, SaleOptions(checkDuplicates = false))`.
+ * 2. **Sale.** [sale] calls `sale(amount, currency, SaleOptions(checkDuplicates = false))`, with
+ *    `surchargeAmount` set when the sale has a surcharge.
  *    Always turn the duplicate check off: the gateway runs it when the sale is forwarded,
  *    with no cardholder to confirm a retry, so a sale it flags is declined for good. The
  *    SDK still sends the check by default (fix requested in SDKS-447). The SDK makes the
@@ -173,20 +175,20 @@ class HandpointSafTerminal(
         return stopped
     }
 
-    override suspend fun sale(amount: Money): SaleOutcome {
+    override suspend fun sale(amount: Money, surcharge: SaleSurcharge?): SaleOutcome {
         val api = api() ?: return SaleOutcome.Failed(NOT_ACTIVE)
-        return sale(api, amount)
+        return sale(api, amount, surcharge)
     }
 
-    private suspend fun sale(api: StoreAndForwardPaymentsApi, amount: Money): SaleOutcome =
+    private suspend fun sale(api: StoreAndForwardPaymentsApi, amount: Money, surcharge: SaleSurcharge?): SaleOutcome =
         listenTo(bridge.transactionResults) { results ->
             val start = api.sale(
                 BigInteger.valueOf(amount.minorUnits),
                 amount.currency.toSdkCurrency(),
-                SaleOptions(checkDuplicates = false),
+                SaleOptions(checkDuplicates = false).withSurcharge(surcharge),
             )
             if (start.operationStarted) {
-                awaitSaleEnd(api, start.transactionReference, amount, results)
+                awaitSaleEnd(api, start.transactionReference, amount, surcharge, results)
             } else {
                 rejectionOutcome(start, amount, results)
             }
@@ -204,6 +206,7 @@ class HandpointSafTerminal(
         api: StoreAndForwardPaymentsApi,
         reference: String,
         amount: Money,
+        surcharge: SaleSurcharge?,
         results: Flow<TransactionResult>,
     ): SaleOutcome {
         var ended = false
@@ -212,7 +215,7 @@ class HandpointSafTerminal(
                 results.first { it.transactionReference == reference }
             }
             ended = result != null
-            return result?.toOutcome(amount, clock.instant())
+            return result?.toOutcome(amount, clock.instant(), surcharge)
                 ?: SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN)
         } finally {
             // Runs on timeout and on cancellation; a CancellationException still propagates.

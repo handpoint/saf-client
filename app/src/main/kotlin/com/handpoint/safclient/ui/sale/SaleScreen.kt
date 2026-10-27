@@ -67,6 +67,8 @@ fun SaleRoute(viewModel: SaleViewModel, onDone: () -> Unit) {
             onDoubleZero = viewModel::onDoubleZero,
             onBackspace = viewModel::onBackspace,
             onCharge = viewModel::charge,
+            onAcceptSurcharge = viewModel::acceptSurcharge,
+            onDeclineSurcharge = viewModel::declineSurcharge,
             onCancel = viewModel::cancel,
             onPrint = viewModel::printReceipt,
             onTryAgain = viewModel::tryAgain,
@@ -82,6 +84,8 @@ class SaleActions(
     val onDoubleZero: () -> Unit = {},
     val onBackspace: () -> Unit = {},
     val onCharge: () -> Unit = {},
+    val onAcceptSurcharge: () -> Unit = {},
+    val onDeclineSurcharge: () -> Unit = {},
     val onCancel: () -> Unit = {},
     val onPrint: () -> Unit = {},
     val onTryAgain: () -> Unit = {},
@@ -109,6 +113,7 @@ fun SaleScreen(
     actions: SaleActions,
     modifier: Modifier = Modifier,
 ) {
+    BackHandler(enabled = state is ChargeUiState.Notice) { actions.onDeclineSurcharge() }
     BackHandler(enabled = state is ChargeUiState.InProgress) {
         val step = (state as? ChargeUiState.InProgress)?.step
         if (step?.cancelAllowed == true) actions.onCancel()
@@ -148,9 +153,18 @@ fun SaleScreen(
                     onCharge = actions.onCharge,
                     onBack = actions.onDone,
                 )
+                is ChargeUiState.Notice -> WithBanner(mode) {
+                    SurchargeNoticeContent(
+                        base = current.base,
+                        surcharge = current.surcharge,
+                        onAccept = actions.onAcceptSurcharge,
+                        onCancel = actions.onDeclineSurcharge,
+                    )
+                }
                 is ChargeUiState.InProgress -> WithBanner(mode) {
                     CardStepContent(
                         amount = amount,
+                        surcharge = current.surcharge,
                         step = current.step,
                         onCancel = actions.onCancel,
                     )

@@ -13,6 +13,7 @@ import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import kotlinx.coroutines.CancellationException
 import java.time.Clock
 import javax.inject.Inject
@@ -49,12 +50,12 @@ class TakeSale @Inject constructor(
     private val clock: Clock,
     private val errors: ErrorReporter,
 ) {
-    suspend operator fun invoke(amount: Money): SaleOutcome {
+    suspend operator fun invoke(amount: Money, surcharge: SaleSurcharge? = null): SaleOutcome {
         val current = mode.beginSale() ?: return SaleOutcome.Failed(PaymentModeCoordinator.SWITCHING)
         try {
             return when (current) {
-                PaymentMode.ONLINE -> online(amount)
-                PaymentMode.OFFLINE -> offline(amount)
+                PaymentMode.ONLINE -> online(amount, surcharge)
+                PaymentMode.OFFLINE -> offline(amount, surcharge)
             }
         } catch (e: CancellationException) {
             throw e
@@ -66,18 +67,18 @@ class TakeSale @Inject constructor(
         }
     }
 
-    private suspend fun online(amount: Money): SaleOutcome {
-        val outcome = online.sale(amount)
+    private suspend fun online(amount: Money, surcharge: SaleSurcharge?): SaleOutcome {
+        val outcome = online.sale(amount, surcharge)
         when {
             outcome is SaleOutcome.ApprovedOnline -> journal.record(outcome.sale)
             outcome is SaleOutcome.Failed && outcome.message == OnlineTerminal.OUTCOME_UNKNOWN ->
-                outcome.reference?.let { journal.record(unconfirmed(it, amount)) }
+                outcome.reference?.let { journal.record(unconfirmed(it, amount, surcharge)) }
         }
         return outcome
     }
 
-    private suspend fun offline(amount: Money): SaleOutcome {
-        val outcome = saf.sale(amount)
+    private suspend fun offline(amount: Money, surcharge: SaleSurcharge?): SaleOutcome {
+        val outcome = saf.sale(amount, surcharge)
         when {
             outcome is SaleOutcome.ApprovedOffline -> journal.record(outcome.sale)
             outcome is SaleOutcome.Failed && outcome.message == StoreAndForwardTerminal.OUTCOME_UNKNOWN -> reconcile()
@@ -86,7 +87,7 @@ class TakeSale @Inject constructor(
     }
 
     /** The trace of an online sale whose outcome is unknown: only what the app knows for sure. */
-    private fun unconfirmed(reference: SaleReference, amount: Money) = Sale(
+    private fun unconfirmed(reference: SaleReference, amount: Money, surcharge: SaleSurcharge?) = Sale(
         reference = reference,
         amount = amount,
         maskedCard = null,
@@ -98,6 +99,7 @@ class TakeSale @Inject constructor(
         merchantReceipt = null,
         customerReceipt = null,
         channel = SaleChannel.ONLINE,
+        surcharge = surcharge,
     )
 
     private fun unknownIn(mode: PaymentMode): String = when (mode) {

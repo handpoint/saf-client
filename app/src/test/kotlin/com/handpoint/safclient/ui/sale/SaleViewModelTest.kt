@@ -12,6 +12,8 @@ import com.handpoint.safclient.domain.model.PaymentMode
 import com.handpoint.safclient.domain.model.ProcessingStatus.SUCCEEDED
 import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleOutcome
+import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.usecase.ReconcileStoredSales
 import com.handpoint.safclient.domain.usecase.TakeSale
 import com.handpoint.safclient.testutil.FakeNetworkMonitor
@@ -526,6 +528,116 @@ class SaleViewModelTest {
     private companion object {
         val UNKNOWN = SaleOutcome.Failed(StoreAndForwardTerminal.OUTCOME_UNKNOWN)
     }
+    // --- surcharge -----------------------------------------------------------------------------
+
+    private fun surchargeOn(percent: String = "3") {
+        settings.surchargeEnabled.value = true
+        settings.surchargePercent.value = java.math.BigDecimal(percent)
+    }
+
+    @Test
+    fun `with surcharge off, charge starts the sale at once and sends no surcharge`() = runTest(dispatcher) {
+        val viewModel = saleViewModel()
+        viewModel.enter(5, 0, 0, 0)
+
+        viewModel.charge()
+
+        assertEquals(listOf<SaleSurcharge?>(null), terminal.saleSurcharges)
+    }
+
+    @Test
+    fun `with surcharge on, charge shows the notice and sends nothing yet`() = runTest(dispatcher) {
+        surchargeOn()
+        val viewModel = saleViewModel()
+        viewModel.enter(5, 0, 0, 0)
+
+        viewModel.charge()
+
+        val notice = viewModel.state.value as ChargeUiState.Notice
+        assertEquals(Money(5000, USD), notice.base)
+        assertEquals(Money(150, USD), notice.surcharge.sent)
+        assertEquals(0, terminal.saleCalls)
+    }
+
+    @Test
+    fun `accepting the notice starts the sale with the surcharge, offline`() = runTest(dispatcher) {
+        surchargeOn()
+        terminal.saleOutcome = SaleOutcome.Cancelled
+        val viewModel = saleViewModel()
+        viewModel.enter(5, 0, 0, 0)
+        viewModel.charge()
+        val surcharge = (viewModel.state.value as ChargeUiState.Notice).surcharge
+
+        viewModel.acceptSurcharge()
+
+        assertEquals(listOf<SaleSurcharge?>(surcharge), terminal.saleSurcharges)
+    }
+
+    @Test
+    fun `an approved sale keeps its surcharge in the journal`() = runTest(dispatcher) {
+        surchargeOn()
+        val viewModel = saleViewModel()
+        viewModel.enter(5, 0, 0, 0)
+        viewModel.charge()
+        val surcharge = (viewModel.state.value as ChargeUiState.Notice).surcharge
+        terminal.saleOutcome = SaleOutcome.ApprovedOffline(sale("S").copy(surcharge = surcharge))
+
+        viewModel.acceptSurcharge()
+
+        assertEquals(surcharge, journal.find(SaleReference("S"))?.surcharge)
+    }
+
+    @Test
+    fun `cancelling the notice sends nothing and keeps the amount`() = runTest(dispatcher) {
+        surchargeOn()
+        val viewModel = saleViewModel()
+        viewModel.enter(5, 0, 0, 0)
+        viewModel.charge()
+
+        viewModel.declineSurcharge()
+
+        assertEquals(ChargeUiState.Idle, viewModel.state.value)
+        assertEquals(Money(5000, USD), viewModel.amount.value)
+        assertEquals(0, terminal.saleCalls)
+    }
+
+    @Test
+    fun `accept and decline do nothing outside the notice`() = runTest(dispatcher) {
+        val viewModel = saleViewModel()
+        viewModel.enter(5, 0, 0, 0)
+
+        viewModel.acceptSurcharge()
+        viewModel.declineSurcharge()
+
+        assertEquals(ChargeUiState.Idle, viewModel.state.value)
+        assertEquals(0, terminal.saleCalls)
+    }
+
+    @Test
+    fun `a surcharge that rounds to nothing is not asked for`() = runTest(dispatcher) {
+        surchargeOn()
+        val viewModel = saleViewModel()
+        viewModel.enter(1, 0)
+
+        viewModel.charge()
+
+        assertEquals(listOf<SaleSurcharge?>(null), terminal.saleSurcharges)
+    }
+
+    @Test
+    fun `online, the surcharge goes through the online API`() = runTest(dispatcher) {
+        surchargeOn()
+        val viewModel = saleViewModel()
+        goOnline(viewModel)
+        viewModel.enter(5, 0, 0, 0)
+        viewModel.charge()
+        val surcharge = (viewModel.state.value as ChargeUiState.Notice).surcharge
+
+        viewModel.acceptSurcharge()
+
+        assertEquals(listOf<SaleSurcharge?>(surcharge), online.saleSurcharges)
+        assertEquals(0, terminal.saleCalls)
+    }
 }
 
 /** Journal whose [record] fails, as when the disk is full. */
@@ -539,5 +651,5 @@ private class RecordFailingJournal(
 private class ThrowingSaleTerminal(
     private val delegate: StoreAndForwardTerminal,
 ) : StoreAndForwardTerminal by delegate {
-    override suspend fun sale(amount: Money): SaleOutcome = throw IllegalStateException("SDK gone")
+    override suspend fun sale(amount: Money, surcharge: SaleSurcharge?): SaleOutcome = throw IllegalStateException("SDK gone")
 }

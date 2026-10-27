@@ -8,6 +8,8 @@ import com.handpoint.api.shared.FinancialStatus
 import com.handpoint.api.shared.OperationStartResult
 import com.handpoint.api.shared.SafTransactionStatus
 import com.handpoint.api.shared.StatusInfo
+import com.handpoint.api.HapiExperimental
+import com.handpoint.api.shared.Surcharge
 import com.handpoint.api.shared.TransactionResult
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionStatus
 import com.handpoint.api.shared.storeandforward.TransactionDeletionFailed
@@ -22,12 +24,14 @@ import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.testutil.FakeSafApi
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.DEVICE
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.OTHER_REFERENCE
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.SALE_REFERENCE
+import java.math.BigDecimal
 import java.math.BigInteger
 import java.time.Clock
 import java.time.Instant
@@ -568,5 +572,56 @@ class HandpointSafTerminalTest {
         }
 
         assertEquals(SaleOutcome.Declined(DeclineReason.OTHER, "Declined here"), terminal.sale(amount))
+    }
+
+    @OptIn(HapiExperimental::class)
+    @Test
+    fun `sale sends the surcharge to the SDK and keeps it on the stored sale`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        fake.duringSale = {
+            fire<Events.EndOfTransaction> { it.endOfTransaction(approvedResult(SALE_REFERENCE), DEVICE) }
+        }
+        val surcharge = SaleSurcharge.of(amount, BigDecimal("3"))
+
+        val outcome = terminal.sale(amount, surcharge) as SaleOutcome.ApprovedOffline
+
+        assertEquals(BigInteger.valueOf(254), fake.lastSaleOptions?.surchargeAmount)
+        assertEquals(false, fake.lastSaleOptions?.checkDuplicates)
+        // The stored sale did not say whether the surcharge applies: it stays "not reported".
+        assertEquals(surcharge, outcome.sale.surcharge)
+        assertEquals(null, outcome.sale.surcharge?.applied)
+    }
+
+    @Test
+    fun `sale without a surcharge sends none`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        fake.duringSale = {
+            fire<Events.EndOfTransaction> { it.endOfTransaction(approvedResult(SALE_REFERENCE), DEVICE) }
+        }
+
+        val outcome = terminal.sale(amount) as SaleOutcome.ApprovedOffline
+
+        assertEquals(null, fake.lastSaleOptions?.surchargeAmount)
+        assertEquals(null, outcome.sale.surcharge)
+    }
+
+    @Suppress("DEPRECATION")
+    @Test
+    fun `the surcharge answer in the result is kept on the sale`() = runTest {
+        val terminal = newTerminal()
+        terminal.connect()
+        fake.duringSale = {
+            val result = approvedResult(SALE_REFERENCE).apply {
+                surcharge = Surcharge(BigDecimal("2.54"), applied = false, reason = "Debit card")
+            }
+            fire<Events.EndOfTransaction> { it.endOfTransaction(result, DEVICE) }
+        }
+
+        val outcome = terminal.sale(amount, SaleSurcharge.of(amount, BigDecimal("3"))) as SaleOutcome.ApprovedOffline
+
+        assertEquals(false, outcome.sale.surcharge?.applied)
+        assertEquals("Debit card", outcome.sale.surcharge?.reason)
     }
 }

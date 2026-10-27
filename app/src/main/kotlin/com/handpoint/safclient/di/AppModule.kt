@@ -109,7 +109,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SafDatabase =
         Room.databaseBuilder(context, SafDatabase::class.java, "saf-client.db")
-            .addMigrations(SafDatabase.MIGRATION_1_2)
+            .addMigrations(SafDatabase.MIGRATION_1_2, SafDatabase.MIGRATION_2_3)
             .build()
 
     @Provides

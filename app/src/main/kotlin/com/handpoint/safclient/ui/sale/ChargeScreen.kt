@@ -43,6 +43,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.SaleSurcharge
+import com.handpoint.safclient.domain.model.formatPercent
 import com.handpoint.safclient.ui.components.AmountText
 import com.handpoint.safclient.ui.components.SecondaryButton
 import com.handpoint.safclient.ui.components.animationsEnabled
@@ -61,6 +63,7 @@ fun CardStepContent(
     step: CardStep?,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    surcharge: SaleSurcharge? = null,
 ) {
     Column(
         modifier = modifier
@@ -77,7 +80,14 @@ fun CardStepContent(
         ) {
             CardPulse(Modifier.size(200.dp))
             Spacer(Modifier.height(32.dp))
-            AmountText(amount, SafTheme.amounts.large)
+            AmountText(surcharge?.totalFor(amount) ?: amount, SafTheme.amounts.large)
+            if (surcharge != null) {
+                Text(
+                    text = "Includes ${surcharge.percent.formatPercent()} surcharge: ${surcharge.sent.format()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = SafTheme.colors.textMuted,
+                )
+            }
             Spacer(Modifier.height(12.dp))
             AnimatedContent(
                 targetState = step.message(),

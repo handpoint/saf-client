@@ -24,4 +24,6 @@ data class Sale(
     val merchantReceipt: String?,
     val customerReceipt: String?,
     val channel: SaleChannel = SaleChannel.OFFLINE,
+    /** The surcharge sent with the sale and what the SDK said about it; `null` for a sale without one. */
+    val surcharge: SaleSurcharge? = null,
 )

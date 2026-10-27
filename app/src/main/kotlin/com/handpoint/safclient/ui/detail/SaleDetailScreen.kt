@@ -64,9 +64,12 @@ import com.handpoint.safclient.domain.model.EntryMode
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
+import com.handpoint.safclient.domain.model.total
 import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.ui.components.AmountText
+import com.handpoint.safclient.ui.components.ReceiptsContent
+import com.handpoint.safclient.ui.components.SurchargeBreakdown
 import com.handpoint.safclient.ui.components.EmptyState
 import com.handpoint.safclient.ui.components.SecondaryButton
 import com.handpoint.safclient.ui.components.StatusPill
@@ -240,11 +243,13 @@ private fun SaleDetails(sale: Sale, unconfirmed: Boolean, snackbar: SnackbarHost
                 .semantics { heading() },
             contentAlignment = Alignment.Center,
         ) {
-            AmountText(sale.amount, SafTheme.amounts.hero)
+            AmountText(sale.total, SafTheme.amounts.hero)
         }
         if (unconfirmed) UnconfirmedNotice()
+        sale.surcharge?.let { SurchargeBreakdown(sale.amount, it, showResult = true) }
         Timeline(sale.timeline())
         InfoCard(sale, snackbar)
+        ReceiptsContent(sale)
         Spacer(Modifier.height(8.dp))
     }
 }

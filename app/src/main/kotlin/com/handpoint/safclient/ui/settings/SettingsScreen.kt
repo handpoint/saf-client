@@ -25,6 +25,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -44,6 +45,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -51,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.handpoint.safclient.BuildConfig
 import com.handpoint.safclient.R
 import com.handpoint.safclient.domain.model.TerminalConnection
+import com.handpoint.safclient.domain.model.formatPercent
 import com.handpoint.safclient.ui.components.ConnectionChip
 import com.handpoint.safclient.ui.settings.SettingsViewModel.Companion.MERCHANT_NAME_MAX
 import com.handpoint.safclient.ui.theme.SafPreviews
@@ -70,6 +73,9 @@ class SettingsActions(
     val onConnect: () -> Unit,
     val onDisconnect: () -> Unit,
     val onOpenGuide: () -> Unit,
+    val onSetSurchargeEnabled: (Boolean) -> Unit = {},
+    /** Returns `false` when the text is not an accepted percent. */
+    val onSaveSurchargePercent: (String) -> Boolean = { true },
 )
 
 /** The settings screen, wired to [SettingsViewModel]. */
@@ -90,6 +96,8 @@ fun SettingsRoute(viewModel: SettingsViewModel, onBack: () -> Unit) {
             onSaveMerchantName = viewModel::saveMerchantName,
             onConnect = viewModel::connect,
             onDisconnect = viewModel::disconnect,
+            onSetSurchargeEnabled = viewModel::setSurchargeEnabled,
+            onSaveSurchargePercent = viewModel::saveSurchargePercent,
             onOpenGuide = {
                 try {
                     context.startActivity(Intent(Intent.ACTION_VIEW, SAF_GUIDE_URL.toUri()))
@@ -114,6 +122,7 @@ fun SettingsScreen(
 ) {
     val background = MaterialTheme.colorScheme.background
     var editingName by rememberSaveable { mutableStateOf(false) }
+    var editingPercent by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier,
@@ -166,6 +175,35 @@ fun SettingsScreen(
                     colors = itemColors(),
                 )
             }
+            Section("Surcharge") {
+                ListItem(
+                    headlineContent = { Text("Ask for a surcharge") },
+                    supportingContent = { Text("Shows the surcharge notice before the card is read") },
+                    trailingContent = {
+                        Switch(checked = state.surchargeEnabled, onCheckedChange = actions.onSetSurchargeEnabled)
+                    },
+                    colors = itemColors(),
+                )
+                Divider()
+                ListItem(
+                    overlineContent = { Text("Percent of the sale amount") },
+                    headlineContent = { Text(state.surchargePercent.formatPercent()) },
+                    supportingContent = {
+                        if (state.surchargePercent > SettingsViewModel.SURCHARGE_CAP_PERCENT) {
+                            Text(
+                                "Above 3%, the usual US limit. The gateway can refuse it.",
+                                color = SafTheme.colors.stored.content,
+                            )
+                        }
+                    },
+                    trailingContent = { Text("Edit", color = SafTheme.colors.accent) },
+                    colors = itemColors(),
+                    modifier = Modifier.clickable(
+                        onClickLabel = "Edit surcharge percent",
+                        role = Role.Button,
+                    ) { editingPercent = true },
+                )
+            }
             Section("About") {
                 ListItem(
                     headlineContent = { Text("SDK version") },
@@ -187,6 +225,14 @@ fun SettingsScreen(
                 )
             }
         }
+    }
+
+    if (editingPercent) {
+        SurchargePercentDialog(
+            initial = state.surchargePercent.stripTrailingZeros().toPlainString(),
+            onSave = actions.onSaveSurchargePercent,
+            onDismiss = { editingPercent = false },
+        )
     }
 
     if (editingName) {
@@ -231,6 +277,33 @@ private fun MerchantNameDialog(initial: String, onSave: (String) -> Boolean, onD
             )
         },
         confirmButton = { TextButton(onClick = save, enabled = name.isNotBlank()) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun SurchargePercentDialog(initial: String, onSave: (String) -> Boolean, onDismiss: () -> Unit) {
+    var text by rememberSaveable { mutableStateOf(initial) }
+    val valid = SettingsViewModel.parseSurchargePercent(text) != null
+    val save = { if (onSave(text)) onDismiss() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Surcharge percent") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it.take(6) },
+                singleLine = true,
+                label = { Text("Percent") },
+                suffix = { Text("%") },
+                isError = text.isNotBlank() && !valid,
+                supportingText = { Text("Above 0, up to 100, two decimals at most") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (valid) save() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = { TextButton(onClick = save, enabled = valid) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

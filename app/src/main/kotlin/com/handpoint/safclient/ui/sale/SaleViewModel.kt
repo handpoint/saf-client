@@ -10,6 +10,7 @@ import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.SaleOutcome
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.domain.model.approvedSale
 import com.handpoint.safclient.domain.usecase.TakeSale
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.math.BigDecimal
 import java.util.Currency
 import javax.inject.Inject
 
@@ -39,8 +41,17 @@ import javax.inject.Inject
 sealed interface ChargeUiState {
     data object Idle : ChargeUiState
 
-    /** The sale runs on the terminal. [step] is `null` until the terminal shows its first prompt. */
-    data class InProgress(val step: CardStep?) : ChargeUiState
+    /**
+     * The customer reads the surcharge ([surcharge] on [base]) and accepts or cancels. Nothing
+     * has been sent to the terminal yet.
+     */
+    data class Notice(val base: Money, val surcharge: SaleSurcharge) : ChargeUiState
+
+    /**
+     * The sale runs on the terminal. [step] is `null` until the terminal shows its first prompt.
+     * [surcharge] is the one the customer accepted, if any.
+     */
+    data class InProgress(val step: CardStep?, val surcharge: SaleSurcharge? = null) : ChargeUiState
 
     data class Result(val outcome: SaleOutcome) : ChargeUiState
 }
@@ -66,7 +77,7 @@ sealed interface ChargeUiState {
 class SaleViewModel @Inject constructor(
     private val takeSale: TakeSale,
     private val payments: PaymentModeCoordinator,
-    settings: AppPreferences,
+    private val settings: AppPreferences,
     @param:IoDispatcher private val io: CoroutineDispatcher,
     private val errors: ErrorReporter,
 ) : ViewModel() {
@@ -76,6 +87,11 @@ class SaleViewModel @Inject constructor(
     /** The amount entered so far, in the currency the terminal takes offline sales in. */
     val amount: StateFlow<Money> = combine(minorUnits, settings.safCurrency, ::Money)
         .stateIn(viewModelScope, SharingStarted.Eagerly, Money.zero(DEFAULT_CURRENCY))
+
+    /** The surcharge percent to ask for, or `null` when surcharge is off in Settings. */
+    private val surchargePercent: StateFlow<BigDecimal?> =
+        combine(settings.surchargeEnabled, settings.surchargePercent) { enabled, percent -> percent.takeIf { enabled } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val _state = MutableStateFlow<ChargeUiState>(ChargeUiState.Idle)
     val state: StateFlow<ChargeUiState> = _state.asStateFlow()
@@ -132,7 +148,10 @@ class SaleViewModel @Inject constructor(
         }
     }
 
-    /** Starts the sale. Ignored at zero and while a sale runs, so a double tap starts one sale. */
+    /**
+     * Starts the sale, or, when surcharge is on in Settings, first shows the surcharge notice.
+     * Ignored at zero and while a sale runs, so a double tap starts one sale.
+     */
     fun charge() {
         if (_state.value != ChargeUiState.Idle) return
         val money = amount.value
@@ -141,15 +160,37 @@ class SaleViewModel @Inject constructor(
             _messages.trySend(SWITCHING_MESSAGE)
             return
         }
-        _state.value = ChargeUiState.InProgress(step = null)
+        // A surcharge that rounds to nothing is not sent: the gateway has nothing to apply.
+        val surcharge = surchargePercent.value?.let { SaleSurcharge.of(money, it) }?.takeIf { it.sent.minorUnits > 0 }
+        if (surcharge == null) startSale(money, null) else _state.value = ChargeUiState.Notice(money, surcharge)
+    }
+
+    /** The customer accepted the surcharge notice: the sale starts, with the surcharge. */
+    fun acceptSurcharge() {
+        val notice = _state.value as? ChargeUiState.Notice ?: return
+        if (payments.state.value.isSwitching) {
+            _state.value = ChargeUiState.Idle
+            _messages.trySend(SWITCHING_MESSAGE)
+            return
+        }
+        startSale(notice.base, notice.surcharge)
+    }
+
+    /** The customer did not accept the surcharge: back to the amount, nothing was sent. */
+    fun declineSurcharge() {
+        if (_state.value is ChargeUiState.Notice) _state.value = ChargeUiState.Idle
+    }
+
+    private fun startSale(money: Money, surcharge: SaleSurcharge?) {
+        _state.value = ChargeUiState.InProgress(step = null, surcharge = surcharge)
         viewModelScope.launch {
             // Card steps are hot with no replay: listen before the sale starts.
             val steps = launch(start = CoroutineStart.UNDISPATCHED) {
-                payments.cardSteps.collect { _state.value = ChargeUiState.InProgress(it) }
+                payments.cardSteps.collect { _state.value = ChargeUiState.InProgress(it, surcharge) }
             }
             // TakeSale ends every error as the unknown outcome of the mode the sale ran in.
             val outcome = try {
-                withContext(io) { takeSale(money) }
+                withContext(io) { takeSale(money, surcharge) }
             } finally {
                 steps.cancel()
             }

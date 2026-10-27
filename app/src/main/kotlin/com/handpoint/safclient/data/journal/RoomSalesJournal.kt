@@ -7,6 +7,7 @@ import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.time.Instant
@@ -58,7 +59,14 @@ private fun SaleEntity.toDomain() = Sale(
     merchantReceipt = merchantReceipt,
     customerReceipt = customerReceipt,
     channel = SaleChannel.valueOf(channel),
+    surcharge = toSurcharge(Currency.getInstance(currencyCode)),
 )
+
+private fun SaleEntity.toSurcharge(currency: Currency): SaleSurcharge? {
+    val percent = surchargePercent?.toBigDecimalOrNull() ?: return null
+    val sent = surchargeSentMinor ?: return null
+    return SaleSurcharge(percent, Money(sent, currency), surchargeApplied, surchargeReason)
+}
 
 private fun Sale.toEntity() = SaleEntity(
     reference = reference.value,
@@ -73,4 +81,8 @@ private fun Sale.toEntity() = SaleEntity(
     merchantReceipt = merchantReceipt,
     customerReceipt = customerReceipt,
     channel = channel.name,
+    surchargePercent = surcharge?.percent?.toPlainString(),
+    surchargeSentMinor = surcharge?.sent?.minorUnits,
+    surchargeApplied = surcharge?.applied,
+    surchargeReason = surcharge?.reason,
 )

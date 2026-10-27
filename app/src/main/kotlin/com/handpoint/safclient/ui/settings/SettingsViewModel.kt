@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.math.BigDecimal
 import java.util.Currency
 import javax.inject.Inject
 
@@ -28,6 +29,10 @@ data class SettingsUiState(
     val connection: TerminalConnection = TerminalConnection.DISCONNECTED,
     /** A connect started here is still running. */
     val connecting: Boolean = false,
+    /** Sales ask for a surcharge (and show the surcharge notice). */
+    val surchargeEnabled: Boolean = false,
+    /** The surcharge as a percent of the sale amount (3 means 3%). */
+    val surchargePercent: BigDecimal = BigDecimal("3"),
 )
 
 @HiltViewModel
@@ -40,13 +45,16 @@ class SettingsViewModel @Inject constructor(
 
     private val connecting = MutableStateFlow(false)
 
+    private val surcharge = combine(preferences.surchargeEnabled, preferences.surchargePercent, ::Pair)
+
     val uiState: StateFlow<SettingsUiState> = combine(
         preferences.merchantName,
         preferences.safCurrency,
         payments.connection,
         connecting,
-    ) { name, currency, connection, connecting ->
-        SettingsUiState(name, currency, connection, connecting)
+        surcharge,
+    ) { name, currency, connection, connecting, (surchargeEnabled, surchargePercent) ->
+        SettingsUiState(name, currency, connection, connecting, surchargeEnabled, surchargePercent)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
@@ -62,6 +70,25 @@ class SettingsViewModel @Inject constructor(
         if (cleaned.isEmpty()) return false
         viewModelScope.launch {
             errors.reportingErrors("save merchant name") { preferences.setMerchantName(cleaned) }
+        }
+        return true
+    }
+
+    fun setSurchargeEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            errors.reportingErrors("save surcharge setting") { preferences.setSurchargeEnabled(enabled) }
+        }
+    }
+
+    /**
+     * Saves the surcharge percent. Returns `false`, and saves nothing, unless [text] is a number
+     * above 0 and up to 100 with at most two decimals. A percent above [SURCHARGE_CAP_PERCENT] is
+     * saved too (a test of the gateway's refusal needs it): the screen warns about it.
+     */
+    fun saveSurchargePercent(text: String): Boolean {
+        val percent = parseSurchargePercent(text) ?: return false
+        viewModelScope.launch {
+            errors.reportingErrors("save surcharge percent") { preferences.setSurchargePercent(percent) }
         }
         return true
     }
@@ -91,6 +118,16 @@ class SettingsViewModel @Inject constructor(
 
     companion object {
         const val MERCHANT_NAME_MAX = 40
+
+        /** The usual legal maximum of a card surcharge in the US (3%). */
+        val SURCHARGE_CAP_PERCENT = BigDecimal("3")
+
+        /** A percent above 0 and up to 100, with at most two decimals; `null` for anything else. */
+        fun parseSurchargePercent(text: String): BigDecimal? {
+            val percent = text.trim().replace(',', '.').toBigDecimalOrNull() ?: return null
+            val valid = percent.signum() > 0 && percent <= BigDecimal(100) && percent.stripTrailingZeros().scale() <= 2
+            return percent.takeIf { valid }
+        }
         private const val STOP_TIMEOUT_MILLIS = 5_000L
     }
 }

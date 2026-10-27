@@ -1,10 +1,12 @@
 package com.handpoint.safclient.data.handpoint
 
+import com.handpoint.api.HapiExperimental
 import com.handpoint.api.shared.CardEntryType
 import com.handpoint.api.shared.ConnectionStatus
 import com.handpoint.api.shared.FinancialStatus
 import com.handpoint.api.shared.SafTransactionStatus
 import com.handpoint.api.shared.StatusInfo
+import com.handpoint.api.shared.options.SaleOptions
 import com.handpoint.api.shared.TransactionResult
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionErrorReason
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionStatus
@@ -22,7 +24,9 @@ import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.model.TerminalConnection
+import java.math.BigInteger
 import java.time.Instant
 import com.handpoint.api.shared.Currency as SdkCurrency
 import java.util.Currency as JavaCurrency
@@ -34,9 +38,10 @@ import java.util.Currency as JavaCurrency
 /**
  * Turns the SDK's end of transaction into a sale outcome.
  *
- * [amount] is the amount the app asked for; [now] is the approval time.
+ * [amount] is the amount the app asked for; [now] is the approval time; [surcharge] is the
+ * surcharge the app sent, completed with what the result says about it.
  */
-internal fun TransactionResult.toOutcome(amount: Money, now: Instant): SaleOutcome =
+internal fun TransactionResult.toOutcome(amount: Money, now: Instant, surcharge: SaleSurcharge? = null): SaleOutcome =
     when (finStatus) {
         // Store and Forward approves offline: the sale is stored on the terminal and
         // forwarded to Handpoint later.
@@ -52,6 +57,7 @@ internal fun TransactionResult.toOutcome(amount: Money, now: Instant): SaleOutco
                 statusCheckedAt = null,
                 merchantReceipt = merchantReceipt.ifBlank { null },
                 customerReceipt = customerReceipt.ifBlank { null },
+                surcharge = surcharge.withResultOf(this),
             ),
         )
 
@@ -83,7 +89,7 @@ internal fun TransactionResult.toOutcome(amount: Money, now: Instant): SaleOutco
  * partial approval) is an unknown outcome: the card may have been charged, so the merchant must
  * not simply charge again.
  */
-internal fun TransactionResult.toOnlineOutcome(amount: Money, now: Instant): SaleOutcome =
+internal fun TransactionResult.toOnlineOutcome(amount: Money, now: Instant, surcharge: SaleSurcharge? = null): SaleOutcome =
     when (finStatus) {
         FinancialStatus.AUTHORISED -> SaleOutcome.ApprovedOnline(
             Sale(
@@ -98,6 +104,7 @@ internal fun TransactionResult.toOnlineOutcome(amount: Money, now: Instant): Sal
                 merchantReceipt = merchantReceipt.ifBlank { null },
                 customerReceipt = customerReceipt.ifBlank { null },
                 channel = SaleChannel.ONLINE,
+                surcharge = surcharge.withResultOf(this),
             ),
         )
 
@@ -111,6 +118,20 @@ internal fun TransactionResult.toOnlineOutcome(amount: Money, now: Instant): Sal
         FinancialStatus.FAILED -> SaleOutcome.Failed(errorMessage.ifBlank { "The sale failed" })
         else -> SaleOutcome.Failed(OnlineTerminal.OUTCOME_UNKNOWN, transactionReference.toReferenceOrNull())
     }
+
+/**
+ * Sets the surcharge on the options of a sale. The SDK sends it to the gateway next to the
+ * amount; the gateway decides from the card's funding type whether to apply it.
+ */
+@OptIn(HapiExperimental::class)
+internal fun SaleOptions.withSurcharge(surcharge: SaleSurcharge?): SaleOptions = apply {
+    if (surcharge != null) surchargeAmount = BigInteger.valueOf(surcharge.sent.minorUnits)
+}
+
+/** The surcharge the app sent, with what the result says about it ("not reported" when it says nothing). */
+@Suppress("DEPRECATION")
+private fun SaleSurcharge?.withResultOf(result: TransactionResult): SaleSurcharge? =
+    this?.withResult(applied = result.surcharge?.applied, reason = result.surcharge?.reason)
 
 /** An untranslated SDK key such as `EXPIRED_CARD`, not a sentence for people. */
 private fun String.isRawKey(): Boolean = matches(Regex("[A-Z0-9_]+"))

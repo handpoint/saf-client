@@ -7,6 +7,7 @@ import com.handpoint.safclient.domain.model.ForwardingEvent
 import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.SaleOutcome
+import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.model.TerminalConnection
@@ -135,7 +136,11 @@ class FakeTerminal : StoreAndForwardTerminal {
         return true
     }
 
-    override suspend fun sale(amount: Money): SaleOutcome {
+    /** Surcharges passed to [sale], in call order (`null` for a sale without one). */
+    val saleSurcharges = mutableListOf<SaleSurcharge?>()
+
+    override suspend fun sale(amount: Money, surcharge: SaleSurcharge?): SaleOutcome {
+        saleSurcharges += surcharge
         saleCalls++
         saleGate?.await()
         return saleOutcome

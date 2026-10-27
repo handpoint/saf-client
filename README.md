@@ -1,15 +1,15 @@
 <div align="center">
 
-# Store and Forward · Android reference app
+# SAF Surcharge · Android test app
 
-**Keep selling when the network goes down.**
-A complete PAX app built to production standards. It shows how to take card payments offline with the Handpoint Android SDK, send them later, and know what happened to each one.
+**Test the classic surcharge with Store and Forward, with and without coverage.**
+The Store and Forward reference app for PAX, plus the classic surcharge (`SaleOptions.surchargeAmount`): a compliance notice before the card is read, the surcharge on the result, and the receipts. It installs beside the original app.
 
 ![Platform](https://img.shields.io/badge/platform-PAX%20Android-1f4fd8)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.3-7f52ff)
 ![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285f4)
-![Handpoint SDK](https://img.shields.io/badge/Handpoint%20SDK-7.1014.x-141a24)
-![Tests](https://img.shields.io/badge/unit%20tests-335%20passing-157a4a)
+![Handpoint SDK](https://img.shields.io/badge/Handpoint%20SDK-7.1014.3-141a24)
+![Tests](https://img.shields.io/badge/unit%20tests-355%20passing-157a4a)
 
 <img src="docs/media/demo-preview.gif" width="300" alt="The app taking a sale on a PAX terminal" />
 
@@ -31,6 +31,65 @@ A shop does not stop selling because the Wi-Fi dropped. With Store and Forward, 
 | 🎛️ **Your app is in control** | Nothing is sent in the background. Your app decides when to send and asks for each result. |
 
 This app also **switches between online and offline sales by itself.** With a network, sales are approved online at once. Without one, they are stored and sent later.
+
+## What this build adds: classic surcharge
+
+This is a **test build** of the Store and Forward app. It asks the gateway for a surcharge on each sale, online and offline, and shows what came back. Its main question: **does the surcharge work when the sale is stored offline?**
+
+| | Store and Forward app | This app (SAF Surcharge) |
+|---|---|---|
+| Branch | `feat/saf-client` | `feat/surcharge-test-14.3` |
+| `applicationId` | `com.handpoint.safclient` | `com.handpoint.safclient.surcharge` |
+| Name on the launcher | Store and Forward | SAF Surcharge |
+| Handpoint SDK | 7.1014.2 | 7.1014.3 |
+| Data (sales, settings) | its own | its own: the two apps share nothing |
+
+Both apps can be installed on the same terminal.
+
+### The merchant flow
+
+1. In **Settings > Surcharge**, switch the surcharge on (off by default) and set the percentage (default 3%). The value must be above 0 and at most 100, with at most 2 decimals. Above 3% the screen warns that the gateway may reject it.
+2. On **Charge**, the app shows the **surcharge notice** before it reads the card:
+
+   | Line | Example |
+   |---|---|
+   | Subtotal | $50.00 |
+   | Surcharge (3%) | $1.50 |
+   | **Total** | **$51.50** |
+
+   The text says: "The total includes the surcharge. If your card is debit or prepaid, the surcharge is removed." **Accept and continue** starts the sale. **Cancel** returns with no SDK call.
+3. The result, the sale detail and the sale list show the total. The result and the sale detail also show **what the SDK reported** about the surcharge, and the **receipts**.
+
+### What the app sends and shows
+
+- The app sends `SaleOptions(checkDuplicates = false).surchargeAmount` on both APIs (Store and Forward and online). `amount` is the **subtotal**; the surcharge goes in `surchargeAmount`, in minor units.
+- The surcharge is `percent` of the subtotal, in `BigDecimal`, **rounded half up** to the minor unit. If it rounds to 0 the app does not send it.
+- The gateway decides if the surcharge applies, from the card's funding type. It removes the surcharge for debit and prepaid cards. The app only asks.
+- The app reads `TransactionResult.surcharge` and shows one of three states:
+
+  | State | Meaning | Total shown |
+  |---|---|---|
+  | **Applied** | The gateway kept the surcharge. | Subtotal + surcharge |
+  | **Removed** | The gateway removed it. The reason is shown. | Subtotal |
+  | **Not reported** | The result has no surcharge. Expected for an offline sale: the card type is not known yet. | Subtotal + surcharge, as asked |
+
+- The surcharge is stored with the sale (Room schema 3), so it stays visible after the sale is sent.
+- **Receipts:** the customer and merchant receipts are shown as the SDK returns them. If a receipt is HTML, the app shows it as plain text. The result has a "View receipts" button, and the sale detail shows both.
+
+### How to test it without coverage
+
+1. Install the app and switch on the surcharge in Settings.
+2. Turn the network off. The app switches to Store and Forward by itself.
+3. Charge $50.00 and accept the notice. Pay with a credit card.
+4. Expect the sale **Stored**, the surcharge **sent** and **not reported**, and the receipts.
+5. Turn the network on and press **Send now**. Check the sale status after the upload: this is where you learn if the gateway accepted the surcharge.
+6. Repeat with a debit or prepaid card, online and offline, and compare the "Removed" state.
+
+> [!NOTE]
+> **Not yet verified on a terminal:** whether the offline result carries `surcharge`, whether the receipts include a surcharge line, and whether the gateway expects the subtotal or the total in `amount`. If it expects the total, the change is one line in the two terminal adapters (`HandpointSafTerminal`, `HandpointOnlineTerminal`).
+
+> [!WARNING]
+> Do not merge this branch into `feat/saf-client` as it is. It changes the app's `applicationId`, name and SDK version, so the base branch would build the surcharge app instead of the original one.
 
 ## See it in action
 
@@ -61,7 +120,7 @@ This app also **switches between online and offline sales by itself.** With a ne
   </tr>
 </table>
 
-<sub>Screenshots taken on a PAX A920MAX in the Handpoint staging environment. The "DEBUG only" mark is the terminal's own debug watermark.</sub>
+<sub>These screenshots are of the base Store and Forward app; the surcharge screens look the same around the notice. Screenshots taken on a PAX A920MAX in the Handpoint staging environment. The "DEBUG only" mark is the terminal's own debug watermark.</sub>
 
 ## How it works
 
@@ -111,25 +170,26 @@ handpoint.sharedSecret=replace-me
 **3. Build and install** on the terminal, connected by USB:
 
 ```bash
-./gradlew installDebug        # build and install
-./gradlew testDebugUnitTest   # run the 335 unit tests; no terminal needed
+./gradlew installDebug        # build and install SAF Surcharge (the original app stays installed)
+./gradlew testDebugUnitTest   # run the 355 unit tests; no terminal needed
 ```
 
 > [!IMPORTANT]
-> **Use SDK 7.1014.2 or later for currencies other than GBP.** In 7.1014.1 and earlier, every offline sale that is not in GBP is declined (SDKS-437). The SDK version is `handpointSdk` in `gradle/libs.versions.toml`.
+> **Use SDK 7.1014.2 or later for currencies other than GBP.** This build uses **7.1014.3**, because 7.1014.2 returned 404 on the Maven repository when it was built. In 7.1014.1 and earlier, every offline sale that is not in GBP is declined (SDKS-437). The SDK version is `handpointSdk` in `gradle/libs.versions.toml`.
 
 > [!TIP]
 > In TMS, Store and Forward **limits are in minor units**: `maxAmountPerTransaction = 100` means **1.00**, not 100.00. The currency and the limits come from the merchant's Store and Forward settings (or the acquirer's), not from the terminal.
 
 ## Where the integration lives
 
-Everything that talks to the SDK is in **five files**. The rest of the app sees only plain domain types, so you can read the whole integration in one sitting. Paths are under `app/src/main/kotlin/com/handpoint/safclient/`.
+Everything that talks to the SDK is in **a few files**. The rest of the app sees only plain domain types, so you can read the whole integration in one sitting. Paths are under `app/src/main/kotlin/com/handpoint/safclient/`.
 
 | File | What you will find |
 |------|--------------------|
 | [`data/handpoint/HandpointSafTerminal.kt`](app/src/main/kotlin/com/handpoint/safclient/data/handpoint/HandpointSafTerminal.kt) | The Store and Forward calls: `start`, `sale`, `forwardStoredTransactions`, `getStoredTransactions`, `getTransactionProcessingStatus`, `deleteStoredTransaction`, `stopCurrentTransaction`, `printReceipt`. It also handles timeouts, declines before the card is read, and the "outcome unknown" rule. |
 | [`data/handpoint/HandpointOnlineTerminal.kt`](app/src/main/kotlin/com/handpoint/safclient/data/handpoint/HandpointOnlineTerminal.kt) | The online calls and outcomes: `AUTHORISED`, `DECLINED`, `CANCELLED` and unknown. |
 | [`data/handpoint/SdkEventBridge.kt`](app/src/main/kotlin/com/handpoint/safclient/data/handpoint/SdkEventBridge.kt) · [`SdkMappers.kt`](app/src/main/kotlin/com/handpoint/safclient/data/handpoint/SdkMappers.kt) | Each SDK event as a Kotlin `Flow`, and the mapping from SDK types to domain types: decline codes, statuses and forwarding results. |
+| [`data/handpoint/SdkMappers.kt`](app/src/main/kotlin/com/handpoint/safclient/data/handpoint/SdkMappers.kt) · [`domain/model/SaleSurcharge.kt`](app/src/main/kotlin/com/handpoint/safclient/domain/model/SaleSurcharge.kt) | The surcharge: `SaleOptions.withSurcharge(...)` sets `surchargeAmount` (an `@HapiExperimental` option, opted in here only), the outcome reads `TransactionResult.surcharge`, and `SaleSurcharge` holds the percentage, the amount and the total. |
 | [`di/AppModule.kt`](app/src/main/kotlin/com/handpoint/safclient/di/AppModule.kt) | The two factories: `HapiFactory.getStoreAndForwardPaymentsApi(…)` and `HapiFactory.getAsyncInterface(…)`. |
 | [`domain/PaymentModeCoordinator.kt`](app/src/main/kotlin/com/handpoint/safclient/domain/PaymentModeCoordinator.kt) | The mode rule and the switch between the two APIs. |
 
@@ -178,6 +238,18 @@ These are SDK facts we confirmed on a real terminal. Each item points to the cod
 
 </details>
 
+<details open>
+<summary><b>Surcharge</b></summary>
+
+- [ ] **Show the surcharge before the card is read.** The merchant sees the percentage and its amount, and can cancel with no SDK call (`ui/sale/SurchargeNoticeScreen.kt`, `ChargeUiState.Notice`).
+- [ ] **`surchargeAmount` is an experimental option, in minor units.** Set it on `SaleOptions`, on both APIs. Keep `amount` as the subtotal (`SdkMappers.withSurcharge`).
+- [ ] **Compute the amount with `BigDecimal`.** Round half up to the minor unit, and do not send 0 (`SaleSurcharge.of`).
+- [ ] **The gateway decides.** It removes the surcharge for debit and prepaid cards. Read `surcharge.applied` and `surcharge.reason`; do not assume it applied (`SdkMappers.withResultOf`).
+- [ ] **An offline result may carry no surcharge.** The card type is not known when the sale is stored. Show "not reported", keep the total as asked, and check the status after the upload (`SurchargeBreakdown`).
+- [ ] **Keep the surcharge with the sale.** The journal stores the percentage, the amount sent, and what the SDK reported (`RoomSalesJournal`, `MIGRATION_2_3`).
+
+</details>
+
 ## Architecture
 
 ```mermaid
@@ -211,7 +283,7 @@ flowchart TB
 ./gradlew testDebugUnitTest
 ```
 
-There are 335 unit tests. They need no terminal and no network: they use hand-written fakes of both SDK APIs (`testutil/FakeSafApi.kt`, `testutil/FakeHapi.kt`). They cover:
+There are 355 unit tests. They need no terminal and no network: they use hand-written fakes of both SDK APIs (`testutil/FakeSafApi.kt`, `testutil/FakeHapi.kt`). They cover:
 
 - the SDK adapters: events, sale outcomes, declines, timeouts, cancel, forwarding, status and delete;
 - the mode rule: no network, sales waiting, never switching during a sale, the 30 s timeout, retry backoff and the 60 s rule after a network drop;
@@ -220,7 +292,9 @@ There are 335 unit tests. They need no terminal and no network: they use hand-wr
 
 ## Good to know
 
-- **Sales only.** The app has no refund or void.
+- **Sales only.** The app has no refund or void, and no refund of a surcharge.
+- **The surcharge is not tested on a terminal yet.** The unit tests cover the amount, the notice, the SDK options, the mapping of the result and the journal migration. See the note in "What this build adds".
+- **The `Fee` model of fee mitigation is not in this app.** It is not in SDK 7.1014.x.
 - **An online sale with an unknown outcome** is kept as "Check with Handpoint" and is never retried.
 - **Online and offline sales use the same currency** (`handpoint.safCurrency`).
 - **While online, the app does not check offline sales sent earlier.** It checks them the next time it uses Store and Forward.

@@ -18,6 +18,10 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.handpoint.safclient.ui.theme.SafPreviewSurface
 import com.handpoint.safclient.ui.theme.SafPreviews
+import com.handpoint.safclient.ui.theme.SafTheme
+
+/** What a [SecondaryButton] means: its outline and label take the colour of the tone. */
+enum class ButtonTone { Neutral, Positive, Negative, Warning }
 
 /**
  * The quieter action next to [PrimaryButton] (Print receipt, Cancel, Done). Same size and
@@ -31,8 +35,16 @@ fun SecondaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     loading: Boolean = false,
+    tone: ButtonTone = ButtonTone.Neutral,
 ) {
     val colors = MaterialTheme.colorScheme
+    val saf = SafTheme.colors
+    val toneColor = when (tone) {
+        ButtonTone.Neutral -> colors.onSurface
+        ButtonTone.Positive -> saf.positiveAction.container
+        ButtonTone.Negative -> saf.negativeAction.container
+        ButtonTone.Warning -> saf.stored.content
+    }
     val active = enabled || loading
     OutlinedButton(
         onClick = onClick,
@@ -42,16 +54,16 @@ fun SecondaryButton(
             .heightIn(min = 60.dp)
             .semantics { if (loading) stateDescription = "Working" },
         shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, if (active) colors.outline else colors.outlineVariant),
+        border = BorderStroke(if (tone == ButtonTone.Neutral) 1.dp else 1.5.dp, if (!active) colors.outlineVariant else if (tone == ButtonTone.Neutral) colors.outline else toneColor),
         colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = colors.onSurface,
-            disabledContentColor = if (loading) colors.onSurface else colors.onSurface.copy(alpha = 0.38f),
+            contentColor = toneColor,
+            disabledContentColor = if (loading) toneColor else colors.onSurface.copy(alpha = 0.38f),
         ),
     ) {
         if (loading) {
             CircularProgressIndicator(
                 modifier = Modifier.size(22.dp),
-                color = colors.onSurface,
+                color = toneColor,
                 strokeWidth = 2.5.dp,
             )
         } else {

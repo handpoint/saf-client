@@ -71,6 +71,7 @@ import com.handpoint.safclient.ui.components.AmountText
 import com.handpoint.safclient.ui.components.ReceiptsContent
 import com.handpoint.safclient.ui.components.SurchargeBreakdown
 import com.handpoint.safclient.ui.components.EmptyState
+import com.handpoint.safclient.ui.components.ButtonTone
 import com.handpoint.safclient.ui.components.SecondaryButton
 import com.handpoint.safclient.ui.components.ResultValuesCard
 import com.handpoint.safclient.ui.components.StatusPill
@@ -166,11 +167,12 @@ fun SaleDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     if (state.canRefund) {
-                        SecondaryButton(text = "Refund", onClick = onRefund, enabled = !state.operationRunning)
+                        SecondaryButton(text = "Refund", onClick = onRefund, enabled = !state.operationRunning, tone = ButtonTone.Warning)
                         SecondaryButton(
                             text = "Reversal",
                             onClick = { confirmingReverse = true },
                             loading = state.operationRunning,
+                            tone = ButtonTone.Negative,
                         )
                     }
                     if (state.canRefresh) {

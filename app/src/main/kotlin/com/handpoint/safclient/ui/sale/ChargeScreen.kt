@@ -46,6 +46,7 @@ import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.model.formatPercent
 import com.handpoint.safclient.ui.components.AmountText
+import com.handpoint.safclient.ui.components.ButtonTone
 import com.handpoint.safclient.ui.components.SecondaryButton
 import com.handpoint.safclient.ui.components.animationsEnabled
 import com.handpoint.safclient.ui.theme.SafPreviewSurface
@@ -116,7 +117,7 @@ fun CardStepContent(
 private fun CancelSlot(visible: Boolean, onCancel: () -> Unit) {
     Box(Modifier.fillMaxWidth().heightIn(min = 60.dp)) {
         AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
-            SecondaryButton(text = "Cancel", onClick = onCancel)
+            SecondaryButton(text = "Cancel", onClick = onCancel, tone = ButtonTone.Negative)
         }
     }
 }

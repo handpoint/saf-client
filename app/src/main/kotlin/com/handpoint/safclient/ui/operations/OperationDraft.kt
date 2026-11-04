@@ -22,6 +22,8 @@ data class OperationForm(
     val avsFields: Boolean = false,
     /** Add the surcharge of Settings to a sale, when Settings has it on. */
     val useAppSurcharge: Boolean = true,
+    /** Send the surcharge and tax fields above. Off by default: the operation carries none. */
+    val useExtras: Boolean = false,
 )
 
 /** The surcharge and tax fields of an [OperationForm], as numbers. */
@@ -33,6 +35,7 @@ data class OperationExtras(val surchargeMinor: Long?, val tax: SaleTax) {
 
 /** The extras of this form, or `null` when one of its amounts is not a number. */
 fun OperationForm.toExtras(): OperationExtras? {
+    if (!useExtras) return OperationExtras.NONE
     val surchargeMinor = parseMinor(surcharge) ?: return null
     val legacy = parseMinor(legacyTax) ?: return null
     val level2 = parseMinor(level2Tax) ?: return null

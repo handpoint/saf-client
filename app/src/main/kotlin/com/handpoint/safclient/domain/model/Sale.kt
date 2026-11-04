@@ -28,6 +28,8 @@ data class Sale(
     val surcharge: SaleSurcharge? = null,
     /** What the SDK's result said, field by field. Shown on the result screen; not stored in the journal. */
     val resultValues: List<ResultLine> = emptyList(),
+    /** The `TransactionResult` as the SDK serializes it (null fields are left out); `null` when the sale was not read from a result. */
+    val resultJson: String? = null,
     /** The SDK's `transactionID`, the one a linked refund names; `null` when the result had none (an unsent offline sale). */
     val transactionId: String? = null,
     /** A MoTo sale (card not present): a refund or reversal of it uses the MoTo calls. */

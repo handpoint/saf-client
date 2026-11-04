@@ -182,6 +182,8 @@ class SaleViewModel @Inject constructor(
             return
         }
         // A surcharge that rounds to nothing is not sent: the gateway has nothing to apply.
+        // A surcharge typed by the tester goes as it is (a 0 too), with no notice for the customer.
+        manualSurcharge(money)?.let { return startSale(money, it) }
         val surcharge = surchargePercent.value?.takeIf { appSurchargeApplies() }?.let { SaleSurcharge.of(money, it) }?.takeIf { it.sent.minorUnits > 0 }
         if (surcharge == null) startSale(money, null) else _state.value = ChargeUiState.Notice(money, surcharge)
     }
@@ -200,6 +202,17 @@ class SaleViewModel @Inject constructor(
     /** The customer did not accept the surcharge: back to the amount, nothing was sent. */
     fun declineSurcharge() {
         if (_state.value is ChargeUiState.Notice) _state.value = ChargeUiState.Idle
+    }
+
+    /**
+     * The surcharge the tester typed in the extra fields of a sale, or `null` when there is none.
+     * It can be 0, which the percent rule of Settings never gives: a test of the `surcharge` the
+     * result returns when the sale sent 0 and not nothing.
+     */
+    private fun manualSurcharge(money: Money): SaleSurcharge? {
+        if (operation != OperationKind.SALE || !operationForm.useExtras) return null
+        val minor = operationForm.toExtras()?.surchargeMinor ?: return null
+        return SaleSurcharge(percent = BigDecimal.ZERO, sent = Money(minor, money.currency))
     }
 
     /** Settings' surcharge goes to a sale, and to a MoTo sale unless the tester turned it off or typed one. */

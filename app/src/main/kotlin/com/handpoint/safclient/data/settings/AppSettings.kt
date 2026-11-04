@@ -76,7 +76,7 @@ class AppSettings(
         val LEVEL2_TAX = longPreferencesKey("level2_tax_minor")
         val TAX_EXEMPT = booleanPreferencesKey("tax_exempt")
         val PURCHASE_ORDER = stringPreferencesKey("purchase_order")
-        const val DEFAULT_MERCHANT_NAME = "My Store"
+        const val DEFAULT_MERCHANT_NAME = "Handpoint testing app"
         val MERCHANT_NAME = stringPreferencesKey("merchant_name")
         val SAF_CURRENCY = stringPreferencesKey("saf_currency")
         val SURCHARGE_ENABLED = booleanPreferencesKey("surcharge_enabled")

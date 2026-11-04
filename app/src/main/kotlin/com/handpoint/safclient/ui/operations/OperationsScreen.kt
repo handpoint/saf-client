@@ -158,7 +158,7 @@ fun OperationsScreen(
 
             ExtrasSection(
                 form = form,
-                showSurcharge = form.kind != OperationKind.SALE,
+                showSurcharge = true,
                 onEdit = onEdit,
             )
         }
@@ -217,7 +217,11 @@ private fun ExtrasSection(form: OperationForm, showSurcharge: Boolean, onEdit: (
                 Column(Modifier.weight(1f)) {
                     Text("Add surcharge or tax fields", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "Optional. Amounts in minor units, sent as typed.",
+                        if (form.kind == OperationKind.SALE) {
+                            "Optional. Minor units, sent as typed (a 0 too), with no notice for the customer."
+                        } else {
+                            "Optional. Amounts in minor units, sent as typed."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = SafTheme.colors.textMuted,
                     )

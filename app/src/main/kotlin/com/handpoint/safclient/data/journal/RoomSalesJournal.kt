@@ -10,6 +10,9 @@ import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.SaleSurcharge
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import com.handpoint.safclient.domain.model.ResultLine
+import org.json.JSONArray
+import org.json.JSONObject
 import java.time.Instant
 import java.util.Currency
 
@@ -62,6 +65,8 @@ private fun SaleEntity.toDomain() = Sale(
     surcharge = toSurcharge(Currency.getInstance(currencyCode)),
     transactionId = transactionId,
     isMoto = moto,
+    resultValues = resultValues.toResultLines(),
+    resultJson = resultJson,
 )
 
 private fun SaleEntity.toSurcharge(currency: Currency): SaleSurcharge? {
@@ -89,4 +94,20 @@ private fun Sale.toEntity() = SaleEntity(
     surchargeReason = surcharge?.reason,
     transactionId = transactionId,
     moto = isMoto,
+    resultValues = resultValues.takeIf { it.isNotEmpty() }?.toJsonText(),
+    resultJson = resultJson,
 )
+
+/** The result values as a JSON array of `{"l": label, "v": value}`. */
+private fun List<ResultLine>.toJsonText(): String =
+    JSONArray(map { JSONObject().put("l", it.label).put("v", it.value) }).toString()
+
+private fun String?.toResultLines(): List<ResultLine> {
+    if (this.isNullOrBlank()) return emptyList()
+    return try {
+        val array = JSONArray(this)
+        (0 until array.length()).map { ResultLine(array.getJSONObject(it).getString("l"), array.getJSONObject(it).getString("v")) }
+    } catch (e: org.json.JSONException) {
+        emptyList()
+    }
+}

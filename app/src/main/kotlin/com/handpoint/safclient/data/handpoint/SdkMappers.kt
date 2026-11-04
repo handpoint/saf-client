@@ -70,6 +70,7 @@ internal fun TransactionResult.toOutcome(amount: Money, now: Instant, surcharge:
                 customerReceipt = customerReceipt.ifBlank { null },
                 surcharge = surcharge.withResultOf(this),
                 resultValues = toResultLines(),
+                resultJson = toJSON(),
                 transactionId = transactionID.ifBlank { null },
             ),
         )
@@ -119,6 +120,7 @@ internal fun TransactionResult.toOnlineOutcome(amount: Money, now: Instant, surc
                 channel = SaleChannel.ONLINE,
                 surcharge = surcharge.withResultOf(this),
                 resultValues = toResultLines(),
+                resultJson = toJSON(),
                 transactionId = transactionID.ifBlank { null },
             ),
         )

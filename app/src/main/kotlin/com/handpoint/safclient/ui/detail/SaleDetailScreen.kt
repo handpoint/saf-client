@@ -1,5 +1,6 @@
 package com.handpoint.safclient.ui.detail
 
+import com.handpoint.safclient.ui.components.TransactionResultDialog
 import android.content.ClipData
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -136,6 +137,7 @@ fun SaleDetailScreen(
     val background = MaterialTheme.colorScheme.background
     var confirmingDelete by rememberSaveable { mutableStateOf(false) }
     var confirmingReverse by rememberSaveable { mutableStateOf(false) }
+    var viewingResult by rememberSaveable { mutableStateOf(false) }
     val sale = state.sale
 
     Scaffold(
@@ -157,7 +159,7 @@ fun SaleDetailScreen(
             )
         },
         bottomBar = {
-            if (sale != null && (state.canRefresh || state.canDelete || state.canRefund)) {
+            if (sale != null && (state.canRefresh || state.canDelete || state.canRefund || sale.hasResult())) {
                 // With edge-to-edge, a custom bottom bar must keep clear of the navigation bar.
                 Column(
                     Modifier
@@ -166,6 +168,9 @@ fun SaleDetailScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    if (sale.hasResult()) {
+                        SecondaryButton(text = "View transaction result", onClick = { viewingResult = true })
+                    }
                     if (state.canRefund) {
                         SecondaryButton(text = "Refund", onClick = onRefund, enabled = !state.operationRunning, tone = ButtonTone.Warning)
                         SecondaryButton(
@@ -224,6 +229,10 @@ fun SaleDetailScreen(
             }
             else -> Unit // loading: the journal answers almost at once
         }
+    }
+
+    if (viewingResult && sale != null) {
+        TransactionResultDialog(sale.resultValues, sale.resultJson, onDismiss = { viewingResult = false })
     }
 
     if (confirmingReverse) {
@@ -501,3 +510,6 @@ private fun SaleDetailScreenPreview() = SafTheme {
         onDelete = {},
     )
 }
+
+/** The sale kept the values of its `TransactionResult`. */
+private fun Sale.hasResult(): Boolean = resultValues.isNotEmpty() || resultJson != null

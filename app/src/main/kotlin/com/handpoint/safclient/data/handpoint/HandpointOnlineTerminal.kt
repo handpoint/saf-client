@@ -234,6 +234,7 @@ class HandpointOnlineTerminal(
                     summary = "STARTED (operationStarted = true), ended ${result.finStatus}",
                     lines = result.toResultLines() + result.toIdentifierLines(),
                     transactionId = result.transactionID.ifBlank { null },
+                    resultJson = result.toJSON(),
                     approved = result.finStatus == FinancialStatus.AUTHORISED,
                     sale = request.takeIf { it.kind == OperationKind.MOTO_SALE }?.let { motoSale(it, result) },
                 )

@@ -91,4 +91,6 @@ data class OperationReport(
     val approved: Boolean = false,
     /** The sale a MoTo sale approval leaves in the history; `null` for any other result. */
     val sale: Sale? = null,
+    /** The `TransactionResult` as the SDK serializes it (null fields are left out); `null` when there is none. */
+    val resultJson: String? = null,
 )

@@ -108,6 +108,7 @@ class SdkMappersTest {
                     status = ProcessingStatus.STORED,
                     statusCheckedAt = null,
                     resultValues = result.toResultLines(),
+                    resultJson = result.toJSON(),
                     merchantReceipt = "merchant copy",
                     customerReceipt = "customer copy",
                 ),

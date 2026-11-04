@@ -37,4 +37,10 @@ data class SaleEntity(
     /** A MoTo sale. Schema version 5. */
     @ColumnInfo(defaultValue = "0")
     val moto: Boolean = false,
+    /** The result values the app shows (label and value), as a JSON array. Schema version 6. */
+    @ColumnInfo(defaultValue = "NULL")
+    val resultValues: String? = null,
+    /** The `TransactionResult` as the SDK serializes it. Schema version 6. */
+    @ColumnInfo(defaultValue = "NULL")
+    val resultJson: String? = null,
 )

@@ -1,5 +1,11 @@
 package com.handpoint.safclient.ui.sale
 
+import com.handpoint.safclient.ui.components.TransactionResultDialog
+import com.handpoint.safclient.ui.components.SecondaryButton
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,6 +32,8 @@ import com.handpoint.safclient.ui.components.ResultValuesCard
  */
 @Composable
 fun OperationResultContent(kind: OperationKind, report: OperationReport, onDone: () -> Unit, modifier: Modifier = Modifier) {
+    var viewing by rememberSaveable { mutableStateOf(false) }
+    if (viewing) TransactionResultDialog(report.lines, report.resultJson, onDismiss = { viewing = false })
     Column(
         modifier
             .fillMaxSize()
@@ -35,7 +43,9 @@ fun OperationResultContent(kind: OperationKind, report: OperationReport, onDone:
     ) {
         Text(kind.label, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
         Text(report.summary, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
-        if (report.lines.isNotEmpty()) ResultValuesCard(report.lines)
+        if (report.lines.isNotEmpty() || report.resultJson != null) {
+            SecondaryButton(text = "View transaction result", onClick = { viewing = true })
+        }
         PrimaryButton(text = "Done", onClick = onDone, emphasis = ButtonEmphasis.Positive)
     }
 }

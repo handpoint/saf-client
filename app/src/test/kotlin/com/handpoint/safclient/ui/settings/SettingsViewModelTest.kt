@@ -60,7 +60,7 @@ class SettingsViewModelTest {
         val viewModel = settingsViewModel()
 
         assertFalse(viewModel.saveMerchantName("   "))
-        assertEquals("My Store", settings.merchantName.value)
+        assertEquals("Handpoint testing app", settings.merchantName.value)
     }
 
     @Test

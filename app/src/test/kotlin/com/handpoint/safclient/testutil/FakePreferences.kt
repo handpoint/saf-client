@@ -8,7 +8,7 @@ import java.util.Currency
 
 /** [AppPreferences] kept in memory. */
 class FakePreferences(currency: Currency = Currency.getInstance("USD")) : AppPreferences {
-    override val merchantName = MutableStateFlow("My Store")
+    override val merchantName = MutableStateFlow("Handpoint testing app")
     override val safCurrency = MutableStateFlow(currency)
     override val surchargeEnabled = MutableStateFlow(false)
     override val surchargePercent = MutableStateFlow(BigDecimal("3"))

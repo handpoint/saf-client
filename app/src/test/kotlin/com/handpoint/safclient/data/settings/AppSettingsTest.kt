@@ -33,7 +33,7 @@ class AppSettingsTest {
     fun defaultsApplyWhenNothingStored() = runBlocking {
         val s = settings("EUR")
 
-        assertEquals("My Store", s.merchantName.first())
+        assertEquals("Handpoint testing app", s.merchantName.first())
         assertEquals(Currency.getInstance("EUR"), s.safCurrency.first())
     }
 

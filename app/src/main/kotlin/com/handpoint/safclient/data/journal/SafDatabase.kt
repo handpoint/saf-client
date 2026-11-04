@@ -12,11 +12,18 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * Version 2 adds `channel`: how each sale was taken (online or offline). Version 1 only took
  * offline sales, so [MIGRATION_1_2] marks every existing sale as offline.
  */
-@Database(entities = [SaleEntity::class], version = 5, exportSchema = true)
+@Database(entities = [SaleEntity::class], version = 6, exportSchema = true)
 abstract class SafDatabase : RoomDatabase() {
     abstract fun saleDao(): SaleDao
 
     companion object {
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sales ADD COLUMN resultValues TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE sales ADD COLUMN resultJson TEXT DEFAULT NULL")
+            }
+        }
+
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE sales ADD COLUMN moto INTEGER NOT NULL DEFAULT 0")

@@ -1,5 +1,6 @@
 package com.handpoint.safclient.ui.sale
 
+import com.handpoint.safclient.ui.components.TransactionResultDialog
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -79,6 +80,7 @@ fun ResultContent(
     val copy = resultCopy(outcome, amount.currency)
     val sale = outcome.approvedSale
     var viewingReceipts by rememberSaveable { mutableStateOf(false) }
+    var viewingResult by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -118,16 +120,15 @@ fun ResultContent(
                     Spacer(Modifier.height(20.dp))
                     SurchargeBreakdown(sale.amount, it, showResult = true)
                 }
-                if (sale.resultValues.isNotEmpty()) {
-                    Spacer(Modifier.height(20.dp))
-                    ResultValuesCard(sale.resultValues)
-                }
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when {
                 copy.canPrint -> {
                     if (sale != null) SecondaryButton(text = "View receipts", onClick = { viewingReceipts = true })
+                    if (sale != null && (sale.resultValues.isNotEmpty() || sale.resultJson != null)) {
+                        SecondaryButton(text = "View transaction result", onClick = { viewingResult = true })
+                    }
                     SecondaryButton(
                         text = if (printing) "Printing…" else "Print receipt",
                         onClick = onPrint,
@@ -148,6 +149,9 @@ fun ResultContent(
         }
     }
     if (viewingReceipts && sale != null) ReceiptsDialog(sale, onDismiss = { viewingReceipts = false })
+    if (viewingResult && sale != null) {
+        TransactionResultDialog(sale.resultValues, sale.resultJson, onDismiss = { viewingResult = false })
+    }
 }
 
 /** Masked card and entry mode, never the full card number; plus the sale's status. */

@@ -16,12 +16,21 @@ val localProps = Properties().apply {
 fun buildConfigString(value: String): String =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+// Handpoint SDK 7.1015.x ships classes with Kotlin metadata 2.4.0; the one Hilt bundles reads up to 2.3.0.
+configurations.configureEach {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "org.jetbrains.kotlin" && requested.name == "kotlin-metadata-jvm") {
+            useVersion("2.4.0")
+        }
+    }
+}
+
 android {
     namespace = "com.handpoint.safclient"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.handpoint.safclient.surcharge145"
+        applicationId = "com.handpoint.safclient.surcharge150"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

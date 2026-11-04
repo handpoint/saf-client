@@ -5,7 +5,9 @@ import com.handpoint.api.shared.CardEntryType
 import com.handpoint.api.shared.ConnectionStatus
 import com.handpoint.api.shared.FinancialStatus
 import com.handpoint.api.shared.MoToChannel
+import com.handpoint.api.shared.options.Level2Options
 import com.handpoint.api.shared.options.MoToOptions
+import com.handpoint.api.shared.options.MoToSaleOptions
 import com.handpoint.api.shared.SafTransactionStatus
 import com.handpoint.api.shared.StatusInfo
 import com.handpoint.api.shared.TaxInformation
@@ -149,8 +151,12 @@ internal fun SaleOptions.withSurcharge(surcharge: SaleSurcharge?): SaleOptions =
 @OptIn(HapiExperimental::class)
 internal fun <T : Options> T.withTax(tax: SaleTax): T = apply {
     tax.legacyTaxMinor?.let { taxAmount = BigInteger.valueOf(it) }
-    if (tax.hasLevel2) taxInformation = TaxInformation(BigInteger.valueOf(tax.level2TaxMinor ?: 0L), tax.taxExempt)
-    tax.purchaseOrder?.let { purchaseOrderNumber = it }
+    // SDK 7.1015.0: only the option types that forward Level II data have taxInformation and the
+    // purchase order (sale, MoTo sale, pre-authorization capture). A refund cannot set them.
+    if (this is Level2Options) {
+        if (tax.hasLevel2) taxInformation = TaxInformation(BigInteger.valueOf(tax.level2TaxMinor ?: 0L), tax.taxExempt)
+        tax.purchaseOrder?.let { purchaseOrderNumber = it }
+    }
 }
 
 /**
@@ -164,13 +170,18 @@ internal fun <T : Options> T.withExtras(request: OperationRequest): T = apply {
 }
 
 /** The MoTo options of [request]: the channel, the AVS fields and the surcharge and tax fields. */
-internal fun OperationRequest.toMoToOptions(): MoToOptions = MoToOptions().apply {
-    channel = when (motoChannel) {
+internal fun OperationRequest.toMoToOptions(): MoToOptions = MoToOptions().withMoto(this).withExtras(this)
+
+/** The MoTo sale options of [request]. Only this type carries Level II data in SDK 7.1015.0. */
+internal fun OperationRequest.toMoToSaleOptions(): MoToSaleOptions = MoToSaleOptions().withMoto(this).withExtras(this)
+
+private fun <T : MoToOptions> T.withMoto(request: OperationRequest): T = apply {
+    channel = when (request.motoChannel) {
         MotoChannel.MAIL_ORDER -> MoToChannel.MO
         MotoChannel.TELEPHONE_ORDER -> MoToChannel.TO
     }
-    enableAvsFields = avsFields
-}.withExtras(this)
+    enableAvsFields = request.avsFields
+}
 
 /** The identifiers a linked refund or a reversal of this result needs, as the integrator reads them. */
 internal fun TransactionResult.toIdentifierLines(): List<ResultLine> = listOf(

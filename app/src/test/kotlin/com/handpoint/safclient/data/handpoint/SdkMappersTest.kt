@@ -289,9 +289,9 @@ class SdkMappersTest {
     }
 
     @Test
-    fun `a MoTo request sets the channel, the AVS fields, the surcharge and the tax`() {
+    fun `a MoTo sale request sets the channel, the AVS fields, the surcharge and the tax`() {
         val request = OperationRequest(
-            kind = OperationKind.MOTO_REFUND,
+            kind = OperationKind.MOTO_SALE,
             amount = Money(1000, Currency.getInstance("USD")),
             surchargeMinor = 30,
             tax = SaleTax(level2TaxMinor = 80, purchaseOrder = "PO-1"),
@@ -299,7 +299,7 @@ class SdkMappersTest {
             avsFields = true,
         )
 
-        val options = request.toMoToOptions()
+        val options = request.toMoToSaleOptions()
 
         assertEquals(MoToChannel.MO, options.channel)
         assertTrue(options.enableAvsFields)
@@ -315,7 +315,22 @@ class SdkMappersTest {
         val options = RefundOptions().withExtras(request)
 
         assertNull(options.surchargeAmount)
-        assertNull(options.taxInformation)
+        assertNull(options.taxAmount)
+    }
+
+    @Test
+    fun `a MoTo refund request keeps the channel and cannot carry Level II data`() {
+        val request = OperationRequest(
+            kind = OperationKind.MOTO_REFUND,
+            amount = Money(1000, Currency.getInstance("USD")),
+            tax = SaleTax(legacyTaxMinor = 200),
+            motoChannel = MotoChannel.MAIL_ORDER,
+        )
+
+        val options = request.toMoToOptions()
+
+        assertEquals(MoToChannel.MO, options.channel)
+        assertEquals(java.math.BigInteger.valueOf(200), options.taxAmount)
     }
 
     @Test

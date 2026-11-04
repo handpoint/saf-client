@@ -20,6 +20,17 @@ The Store and Forward reference app for PAX, plus the classic surcharge (`SaleOp
 ---
 
 > [!NOTE]
+> **Branch `feat/surcharge-test-15.0`: SAF Surcharge 15.0.** The 14.5 test app below, on Handpoint SDK
+> `7.1015.0-RC.71-SNAPSHOT` (staging). It installs beside the other apps (`applicationId`
+> `com.handpoint.safclient.surcharge150`). Differences from the 14.5 branch:
+> - In SDK 7.1015.0 `taxInformation` and `purchaseOrderNumber` exist only on the options that forward Level II
+>   data (sale, MoTo sale, pre-authorization capture). A refund cannot carry them, so the Level II fields are
+>   ignored for a refund; the legacy `taxAmount` and `surchargeAmount` can still be set.
+> - A MoTo sale uses `MoToSaleOptions`.
+> - `surchargeAmount` is deprecated in favour of `fee`; the app still sends `surchargeAmount`.
+> - The build forces `kotlin-metadata-jvm` 2.4.0 so Hilt can read the SDK classes.
+>
+> [!NOTE]
 > **Branch `feat/surcharge-test-14.5`: SAF Surcharge 14.5.** The same test app on Handpoint SDK `7.1014.5-RC.4-SNAPSHOT`
 > (the release is not on Nexus yet), to test SDKS-465, 467, 468, 469 and 470. It installs beside the other two apps
 > (`applicationId` `com.handpoint.safclient.surcharge145`). Added here:

@@ -198,7 +198,7 @@ class HandpointOnlineTerminal(
             OperationKind.REFUND -> hapi.refund(amount!!, currency!!, RefundOptions().withExtras(request))
             OperationKind.LINKED_REFUND ->
                 hapi.refund(amount!!, currency!!, originalId, RefundOptions().withExtras(request))
-            OperationKind.MOTO_SALE -> hapi.motoSale(amount!!, currency!!, request.toMoToOptions())
+            OperationKind.MOTO_SALE -> hapi.motoSale(amount!!, currency!!, request.toMoToSaleOptions())
             OperationKind.MOTO_REFUND ->
                 hapi.motoRefund(amount!!, currency!!, null as String?, request.toMoToOptions())
             OperationKind.MOTO_LINKED_REFUND ->

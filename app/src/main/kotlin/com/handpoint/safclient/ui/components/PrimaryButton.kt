@@ -35,9 +35,9 @@ private val PrimaryButtonHeight = 60.dp
 
 /**
  * Colour of a [PrimaryButton]: [Ink] by default, [Accent] for the screen's lead action next to dark content,
- * [Positive] (green) for an action that goes forward or confirms, [Negative] (red) for one that stops or undoes.
+ * [Positive] (green) for an action that goes forward or confirms, [Negative] (red) for one that stops or undoes, [Warning] (amber) for one that moves money back.
  */
-enum class ButtonEmphasis { Ink, Accent, Positive, Negative }
+enum class ButtonEmphasis { Ink, Accent, Positive, Negative, Warning }
 
 /**
  * The single main action of a screen (Charge, Send now). Full width, 60 dp tall.
@@ -66,6 +66,7 @@ fun PrimaryButton(
         ButtonEmphasis.Accent -> SafTheme.colors.accentAction.let { it.container to it.content }
         ButtonEmphasis.Positive -> SafTheme.colors.positiveAction.let { it.container to it.content }
         ButtonEmphasis.Negative -> SafTheme.colors.negativeAction.let { it.container to it.content }
+        ButtonEmphasis.Warning -> SafTheme.colors.warningAction.let { it.container to it.content }
     }
     // While loading the button is not clickable, but it keeps its active colours.
     val buttonColors = if (loading) {

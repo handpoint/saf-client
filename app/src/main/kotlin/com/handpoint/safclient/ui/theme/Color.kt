@@ -49,6 +49,8 @@ data class SafColors(
     val positiveAction: Tone,
     /** Filled action that stops or undoes (Cancel, Reversal, Delete): label on red, WCAG AA. */
     val negativeAction: Tone,
+    /** Filled action that moves money back (Refund): label on amber, WCAG AA. */
+    val warningAction: Tone,
 )
 
 internal val LightSafColors = SafColors(
@@ -64,6 +66,7 @@ internal val LightSafColors = SafColors(
     accentAction = Tone(content = Color.White, container = Accent),
     positiveAction = Tone(content = Color.White, container = Color(0xFF13683F)),
     negativeAction = Tone(content = Color.White, container = ErrorLight),
+    warningAction = Tone(content = Color.White, container = Color(0xFF8A5300)),
 )
 
 internal val DarkSafColors = SafColors(
@@ -79,4 +82,5 @@ internal val DarkSafColors = SafColors(
     accentAction = Tone(content = CanvasDark, container = AccentDark),
     positiveAction = Tone(content = CanvasDark, container = Color(0xFF5CD394)),
     negativeAction = Tone(content = CanvasDark, container = ErrorDark),
+    warningAction = Tone(content = CanvasDark, container = Color(0xFFF5B65A)),
 )

@@ -31,6 +31,10 @@ fun SafNavHost(
     @Composable
     fun back(): () -> Unit = dropUnlessResumed { navController.popBackStack() }
 
+    /** Done: always to Home, whatever screens the flow went through. */
+    @Composable
+    fun toHome(): () -> Unit = dropUnlessResumed { navController.popBackStack(Routes.HOME, inclusive = false) }
+
     NavHost(navController = navController, startDestination = Routes.HOME, modifier = modifier) {
         composable(Routes.HOME) {
             HomeRoute(
@@ -46,7 +50,7 @@ fun SafNavHost(
             arguments = listOf(
                 navArgument(Routes.AMOUNT_VALUE) { type = NavType.StringType; nullable = true; defaultValue = null },
             ),
-        ) { SaleRoute(viewModel = hiltViewModel(), onDone = back()) }
+        ) { SaleRoute(viewModel = hiltViewModel(), onDone = toHome(), onBack = back()) }
         composable(Routes.SENDING) { SendingRoute(viewModel = hiltViewModel(), onDone = back()) }
         composable(
             route = Routes.SALE,

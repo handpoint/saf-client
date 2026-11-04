@@ -38,9 +38,12 @@ import com.handpoint.safclient.domain.model.Money
 import com.handpoint.safclient.domain.model.OperationKind
 import com.handpoint.safclient.domain.model.TerminalConnection
 
-/** The charge flow screen, wired to [SaleViewModel]. [onDone] leaves the flow (back to Home). */
+/**
+ * The charge flow screen, wired to [SaleViewModel]. [onDone] ends the flow and goes to Home; [onBack] is the
+ * back arrow of the keypad, one screen back.
+ */
 @Composable
-fun SaleRoute(viewModel: SaleViewModel, onDone: () -> Unit) {
+fun SaleRoute(viewModel: SaleViewModel, onDone: () -> Unit, onBack: () -> Unit = onDone) {
     val amount by viewModel.amount.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val connection by viewModel.connection.collectAsStateWithLifecycle()
@@ -81,6 +84,7 @@ fun SaleRoute(viewModel: SaleViewModel, onDone: () -> Unit) {
             onTryAgain = viewModel::tryAgain,
             onChangeAmount = viewModel::changeAmount,
             onDone = onDone,
+            onBack = onBack,
         ),
     )
 }
@@ -98,6 +102,8 @@ class SaleActions(
     val onTryAgain: () -> Unit = {},
     val onChangeAmount: () -> Unit = {},
     val onDone: () -> Unit = {},
+    /** The back arrow of the keypad: the previous screen. */
+    val onBack: () -> Unit = {},
 )
 
 /**
@@ -159,7 +165,7 @@ fun SaleScreen(
                     onDoubleZero = actions.onDoubleZero,
                     onBackspace = actions.onBackspace,
                     onCharge = actions.onCharge,
-                    onBack = actions.onDone,
+                    onBack = actions.onBack,
                     operation = operation,
                 )
                 is ChargeUiState.Notice -> WithBanner(mode) {

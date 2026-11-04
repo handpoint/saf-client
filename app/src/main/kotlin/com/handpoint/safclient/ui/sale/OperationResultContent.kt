@@ -44,7 +44,7 @@ fun OperationResultContent(kind: OperationKind, report: OperationReport, onDone:
         Text(kind.label, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
         Text(report.summary, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
         if (report.lines.isNotEmpty() || report.resultJson != null) {
-            SecondaryButton(text = "View transaction result", onClick = { viewing = true })
+            PrimaryButton(text = "View transaction result", onClick = { viewing = true }, emphasis = ButtonEmphasis.Accent)
         }
         PrimaryButton(text = "Done", onClick = onDone, emphasis = ButtonEmphasis.Positive)
     }

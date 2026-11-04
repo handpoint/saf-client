@@ -127,7 +127,7 @@ class HomeScreenTest {
     @Test
     fun newSaleNeedsAConnectedTerminal() {
         show(waiting.copy(connection = TerminalConnection.DISCONNECTED))
-        compose.onNodeWithText("New sale").assertIsNotEnabled()
+        compose.onNodeWithText("New operation").assertIsNotEnabled()
         compose.onNodeWithText("Connect the terminal to take sales").assertExists()
     }
 
@@ -203,7 +203,7 @@ class HomeScreenTest {
         val switching = online.copy(mode = PaymentMode.OFFLINE, switchingTo = PaymentMode.ONLINE, wasOffline = true)
         show(waiting.copy(pendingCount = 0, pending = null, stored = emptyList(), mode = switching))
         compose.onNodeWithText("Back online · getting ready…").assertExists()
-        compose.onNodeWithText("New sale").assertIsNotEnabled()
+        compose.onNodeWithText("New operation").assertIsNotEnabled()
         compose.onNodeWithText("Getting ready. New sale is back in a moment.").assertExists()
     }
 

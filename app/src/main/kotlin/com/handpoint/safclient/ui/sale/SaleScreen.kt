@@ -11,6 +11,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalContext
+import android.app.Activity
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -30,6 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.handpoint.safclient.ui.components.ConnectivityBanner
 import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.OperationKind
 import com.handpoint.safclient.domain.model.TerminalConnection
 
 /** The charge flow screen, wired to [SaleViewModel]. [onDone] leaves the flow (back to Home). */
@@ -62,6 +68,7 @@ fun SaleRoute(viewModel: SaleViewModel, onDone: () -> Unit) {
         printing = printing,
         shakeSignal = shakeSignal,
         snackbar = snackbar,
+        operation = viewModel.operation,
         actions = SaleActions(
             onDigit = viewModel::onDigit,
             onDoubleZero = viewModel::onDoubleZero,
@@ -112,11 +119,12 @@ fun SaleScreen(
     snackbar: SnackbarHostState,
     actions: SaleActions,
     modifier: Modifier = Modifier,
+    operation: OperationKind = OperationKind.SALE,
 ) {
     BackHandler(enabled = state is ChargeUiState.Notice) { actions.onDeclineSurcharge() }
     BackHandler(enabled = state is ChargeUiState.InProgress) {
         val step = (state as? ChargeUiState.InProgress)?.step
-        if (step?.cancelAllowed == true) actions.onCancel()
+        if (operation != OperationKind.SALE || step?.cancelAllowed == true) actions.onCancel()
     }
     Scaffold(
         modifier = modifier,
@@ -152,6 +160,7 @@ fun SaleScreen(
                     onBackspace = actions.onBackspace,
                     onCharge = actions.onCharge,
                     onBack = actions.onDone,
+                    operation = operation,
                 )
                 is ChargeUiState.Notice -> WithBanner(mode) {
                     SurchargeNoticeContent(
@@ -162,12 +171,26 @@ fun SaleScreen(
                     )
                 }
                 is ChargeUiState.InProgress -> WithBanner(mode) {
-                    CardStepContent(
-                        amount = amount,
-                        surcharge = current.surcharge,
-                        step = current.step,
-                        onCancel = actions.onCancel,
-                    )
+                    val activity = LocalContext.current as? Activity
+                    Column(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(1f)) {
+                            CardStepContent(
+                                amount = amount,
+                                surcharge = current.surcharge,
+                                step = current.step,
+                                onCancel = actions.onCancel,
+                                moto = operation.isMoto,
+                            )
+                        }
+                        // The sale keeps running in the SDK; this only sends the app to the background.
+                        TextButton(
+                            onClick = { activity?.moveTaskToBack(true) },
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                        ) { Text("Go to Android") }
+                    }
+                }
+                is ChargeUiState.OperationDone -> WithBanner(mode) {
+                    OperationResultContent(kind = current.kind, report = current.report, onDone = actions.onDone)
                 }
                 is ChargeUiState.Result -> WithBanner(mode) {
                     ResultContent(

@@ -1,5 +1,6 @@
 package com.handpoint.safclient.ui.sale
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.handpoint.safclient.di.IoDispatcher
@@ -9,11 +10,20 @@ import com.handpoint.safclient.domain.PaymentModeCoordinator
 import com.handpoint.safclient.domain.model.CardStep
 import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.OperationKind
+import com.handpoint.safclient.domain.model.OperationReport
+import com.handpoint.safclient.domain.model.OperationRequest
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleSurcharge
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.domain.model.approvedSale
+import com.handpoint.safclient.domain.usecase.RunOperation
 import com.handpoint.safclient.domain.usecase.TakeSale
+import com.handpoint.safclient.ui.navigation.Routes
+import com.handpoint.safclient.ui.operations.OperationDraft
+import com.handpoint.safclient.ui.operations.OperationExtras
+import com.handpoint.safclient.ui.operations.OperationForm
+import com.handpoint.safclient.ui.operations.toExtras
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -54,6 +64,9 @@ sealed interface ChargeUiState {
     data class InProgress(val step: CardStep?, val surcharge: SaleSurcharge? = null) : ChargeUiState
 
     data class Result(val outcome: SaleOutcome) : ChargeUiState
+
+    /** A test operation (a refund, a MoTo operation...) ended: what the SDK answered. */
+    data class OperationDone(val kind: OperationKind, val report: OperationReport) : ChargeUiState
 }
 
 /**
@@ -80,9 +93,17 @@ class SaleViewModel @Inject constructor(
     private val settings: AppPreferences,
     @param:IoDispatcher private val io: CoroutineDispatcher,
     private val errors: ErrorReporter,
+    private val runOperation: RunOperation,
+    private val draft: OperationDraft,
+    savedState: SavedStateHandle,
 ) : ViewModel() {
 
-    private val minorUnits = MutableStateFlow(0L)
+    /** What this flow runs: a sale (online or Store and Forward) or one of the test operations. */
+    val operation: OperationKind = draft.form.kind
+
+    private val operationForm: OperationForm = draft.form
+
+    private val minorUnits = MutableStateFlow(savedState.get<String>(Routes.AMOUNT_VALUE)?.toLongOrNull() ?: 0L)
 
     /** The amount entered so far, in the currency the terminal takes offline sales in. */
     val amount: StateFlow<Money> = combine(minorUnits, settings.safCurrency, ::Money)
@@ -155,13 +176,13 @@ class SaleViewModel @Inject constructor(
     fun charge() {
         if (_state.value != ChargeUiState.Idle) return
         val money = amount.value
-        if (money.minorUnits <= 0) return
+        if (money.minorUnits <= 0 && operation.needsAmount) return
         if (payments.state.value.isSwitching) {
             _messages.trySend(SWITCHING_MESSAGE)
             return
         }
         // A surcharge that rounds to nothing is not sent: the gateway has nothing to apply.
-        val surcharge = surchargePercent.value?.let { SaleSurcharge.of(money, it) }?.takeIf { it.sent.minorUnits > 0 }
+        val surcharge = surchargePercent.value?.takeIf { appSurchargeApplies() }?.let { SaleSurcharge.of(money, it) }?.takeIf { it.sent.minorUnits > 0 }
         if (surcharge == null) startSale(money, null) else _state.value = ChargeUiState.Notice(money, surcharge)
     }
 
@@ -181,7 +202,48 @@ class SaleViewModel @Inject constructor(
         if (_state.value is ChargeUiState.Notice) _state.value = ChargeUiState.Idle
     }
 
+    /** Settings' surcharge goes to a sale, and to a MoTo sale unless the tester turned it off or typed one. */
+    private fun appSurchargeApplies(): Boolean = when (operation) {
+        OperationKind.SALE -> true
+        OperationKind.MOTO_SALE -> operationForm.useAppSurcharge && operationForm.surcharge.isBlank()
+        else -> false
+    }
+
+    /** Runs a test operation of the online API and ends in [ChargeUiState.OperationDone]. */
+    private fun startOperation(money: Money, surcharge: SaleSurcharge?) {
+        _state.value = ChargeUiState.InProgress(step = null, surcharge = surcharge)
+        viewModelScope.launch {
+            val steps = launch(start = CoroutineStart.UNDISPATCHED) {
+                payments.cardSteps.collect { _state.value = ChargeUiState.InProgress(it, surcharge) }
+            }
+            val extras = operationForm.toExtras() ?: OperationExtras.NONE
+            val request = OperationRequest(
+                kind = operation,
+                amount = money.takeIf { it.minorUnits > 0 || operation.needsAmount },
+                originalTransactionId = operationForm.originalTransactionId.trim().ifEmpty { null },
+                surchargeMinor = extras.surchargeMinor ?: surcharge?.sent?.minorUnits,
+                tax = extras.tax,
+                motoChannel = operationForm.motoChannel,
+                avsFields = operationForm.avsFields,
+                surcharge = surcharge,
+            )
+            val report = try {
+                withContext(io) { runOperation(request) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                errors.report("operation", e)
+                OperationReport("The operation failed: ${e.message}")
+            } finally {
+                steps.cancel()
+            }
+            report.transactionId?.let { draft.lastTransactionId = it }
+            _state.value = ChargeUiState.OperationDone(operation, report)
+        }
+    }
+
     private fun startSale(money: Money, surcharge: SaleSurcharge?) {
+        if (operation != OperationKind.SALE) return startOperation(money, surcharge)
         _state.value = ChargeUiState.InProgress(step = null, surcharge = surcharge)
         viewModelScope.launch {
             // Card steps are hot with no replay: listen before the sale starts.
@@ -212,7 +274,7 @@ class SaleViewModel @Inject constructor(
     /** Asks the terminal to stop the sale. Only works while the current card step allows it. */
     fun cancel() {
         val current = _state.value as? ChargeUiState.InProgress ?: return
-        if (current.step?.cancelAllowed != true) return
+        if (operation == OperationKind.SALE && current.step?.cancelAllowed != true) return
         viewModelScope.launch {
             val cancelled = try {
                 withContext(io) { payments.cancelSale() }

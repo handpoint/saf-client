@@ -1,5 +1,8 @@
 package com.handpoint.safclient.ui.sale
 
+import androidx.lifecycle.SavedStateHandle
+import com.handpoint.safclient.domain.usecase.RunOperation
+import com.handpoint.safclient.ui.operations.OperationDraft
 import com.handpoint.safclient.domain.OnlineTerminal
 import com.handpoint.safclient.domain.PaymentModeCoordinator
 import com.handpoint.safclient.domain.SalesJournal
@@ -74,7 +77,7 @@ class SaleViewModelTest {
         reconcile = ReconcileStoredSales(saf, journal, settings, clock)
         mode = paymentMode(saf, journal, clock, online = online, network = network, reconcile = reconcile, io = dispatcher)
         val takeSale = TakeSale(saf, online, journal, reconcile, mode, clock, errors)
-        return SaleViewModel(takeSale, mode, settings, dispatcher, errors)
+        return SaleViewModel(takeSale, mode, settings, dispatcher, errors, RunOperation(online, mode, journal), OperationDraft(), SavedStateHandle())
     }
 
     private fun SaleViewModel.enter(vararg digits: Int) = digits.forEach(::onDigit)

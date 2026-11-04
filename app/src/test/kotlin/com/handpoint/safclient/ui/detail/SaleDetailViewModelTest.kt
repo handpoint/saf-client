@@ -1,5 +1,7 @@
 package com.handpoint.safclient.ui.detail
 
+import com.handpoint.safclient.domain.usecase.RunOperation
+import com.handpoint.safclient.testutil.FakeOnlineTerminal
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import com.handpoint.safclient.domain.PaymentModeCoordinator
@@ -70,6 +72,8 @@ class SaleDetailViewModelTest {
             payments = paymentMode(terminal, journal, clock, network = network, io = dispatcher).also { payments = it },
             io = dispatcher,
             errors = errors,
+            runOperation = RunOperation(FakeOnlineTerminal(), payments, journal),
+            clock = clock,
         )
         backgroundScope.launch(dispatcher) { viewModel.uiState.collect {} }
         return viewModel

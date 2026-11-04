@@ -72,6 +72,7 @@ import com.handpoint.safclient.ui.components.ReceiptsContent
 import com.handpoint.safclient.ui.components.SurchargeBreakdown
 import com.handpoint.safclient.ui.components.EmptyState
 import com.handpoint.safclient.ui.components.SecondaryButton
+import com.handpoint.safclient.ui.components.ResultValuesCard
 import com.handpoint.safclient.ui.components.StatusPill
 import com.handpoint.safclient.ui.components.label
 import com.handpoint.safclient.ui.theme.SafPreviews
@@ -86,7 +87,7 @@ import java.util.Locale
 
 /** The sale detail screen, wired to [SaleDetailViewModel]. [onBack] leaves it (also after a delete). */
 @Composable
-fun SaleDetailRoute(viewModel: SaleDetailViewModel, onBack: () -> Unit) {
+fun SaleDetailRoute(viewModel: SaleDetailViewModel, onBack: () -> Unit, onRefund: (Sale) -> Unit = {}) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -107,6 +108,9 @@ fun SaleDetailRoute(viewModel: SaleDetailViewModel, onBack: () -> Unit) {
         onBack = onBack,
         onRefresh = viewModel::refreshStatus,
         onDelete = viewModel::deleteSale,
+        onRefund = { state.sale?.let(onRefund) },
+        onReverse = viewModel::reverse,
+        onDismissReport = viewModel::dismissOperationReport,
     )
 }
 
@@ -124,9 +128,13 @@ fun SaleDetailScreen(
     onRefresh: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    onRefund: () -> Unit = {},
+    onReverse: () -> Unit = {},
+    onDismissReport: () -> Unit = {},
 ) {
     val background = MaterialTheme.colorScheme.background
     var confirmingDelete by rememberSaveable { mutableStateOf(false) }
+    var confirmingReverse by rememberSaveable { mutableStateOf(false) }
     val sale = state.sale
 
     Scaffold(
@@ -148,7 +156,7 @@ fun SaleDetailScreen(
             )
         },
         bottomBar = {
-            if (sale != null && (state.canRefresh || state.canDelete)) {
+            if (sale != null && (state.canRefresh || state.canDelete || state.canRefund)) {
                 // With edge-to-edge, a custom bottom bar must keep clear of the navigation bar.
                 Column(
                     Modifier
@@ -157,6 +165,14 @@ fun SaleDetailScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    if (state.canRefund) {
+                        SecondaryButton(text = "Refund", onClick = onRefund, enabled = !state.operationRunning)
+                        SecondaryButton(
+                            text = "Reversal",
+                            onClick = { confirmingReverse = true },
+                            loading = state.operationRunning,
+                        )
+                    }
                     if (state.canRefresh) {
                         SecondaryButton(
                             text = "Refresh status",
@@ -206,6 +222,32 @@ fun SaleDetailScreen(
             }
             else -> Unit // loading: the journal answers almost at once
         }
+    }
+
+    if (confirmingReverse) {
+        AlertDialog(
+            onDismissRequest = { confirmingReverse = false },
+            title = { Text("Reverse this sale?") },
+            text = { Text("It sends a reversal of this transaction to Handpoint. The terminal may ask for the card data (MoTo).") },
+            confirmButton = {
+                TextButton(onClick = { confirmingReverse = false; onReverse() }) { Text("Reverse") }
+            },
+            dismissButton = { TextButton(onClick = { confirmingReverse = false }) { Text("Keep") } },
+        )
+    }
+
+    state.operationReport?.let { report ->
+        AlertDialog(
+            onDismissRequest = onDismissReport,
+            title = { Text("Reversal") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(report.summary, style = MaterialTheme.typography.bodyMedium)
+                    if (report.lines.isNotEmpty()) ResultValuesCard(report.lines)
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismissReport) { Text("Close") } },
+        )
     }
 
     if (confirmingDelete && state.canDelete) {

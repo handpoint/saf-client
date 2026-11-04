@@ -49,6 +49,7 @@ import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.approvedSale
 import com.handpoint.safclient.domain.model.total
 import com.handpoint.safclient.ui.components.ReceiptsDialog
+import com.handpoint.safclient.ui.components.ResultValuesCard
 import com.handpoint.safclient.ui.components.SurchargeBreakdown
 import com.handpoint.safclient.ui.components.AmountText
 import com.handpoint.safclient.ui.components.ButtonEmphasis
@@ -116,6 +117,10 @@ fun ResultContent(
                 sale.surcharge?.let {
                     Spacer(Modifier.height(20.dp))
                     SurchargeBreakdown(sale.amount, it, showResult = true)
+                }
+                if (sale.resultValues.isNotEmpty()) {
+                    Spacer(Modifier.height(20.dp))
+                    ResultValuesCard(sale.resultValues)
                 }
             }
         }

@@ -1,6 +1,7 @@
 package com.handpoint.safclient.ui.settings
 
 import com.handpoint.safclient.domain.model.TerminalConnection
+import com.handpoint.safclient.testutil.FakeOnlineTerminal
 import com.handpoint.safclient.testutil.FakePreferences
 import com.handpoint.safclient.testutil.FakeTerminal
 import com.handpoint.safclient.testutil.InMemoryJournal

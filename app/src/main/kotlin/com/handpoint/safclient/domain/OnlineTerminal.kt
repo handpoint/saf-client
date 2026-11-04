@@ -1,6 +1,8 @@
 package com.handpoint.safclient.domain
 
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.OperationReport
+import com.handpoint.safclient.domain.model.OperationRequest
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleSurcharge
 
@@ -32,6 +34,14 @@ interface OnlineTerminal : PaymentTerminal {
      * know.
      */
     suspend fun sale(amount: Money, surcharge: SaleSurcharge? = null): SaleOutcome
+
+    /**
+     * Test only: starts [request] (a sale, a refund, a MoTo operation...) and waits for its end.
+     * The report says whether the SDK started it (`operationStarted`) and carries the values of
+     * the `TransactionResult`. After 180 seconds, or when the caller is cancelled, the operation
+     * is asked to stop.
+     */
+    suspend fun run(request: OperationRequest): OperationReport = OperationReport("Operations are not supported")
 
     companion object {
         /** Message of the [SaleOutcome.Failed] returned when an online sale's outcome is unknown. */

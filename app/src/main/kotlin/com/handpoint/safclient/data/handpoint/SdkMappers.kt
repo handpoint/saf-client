@@ -4,8 +4,13 @@ import com.handpoint.api.HapiExperimental
 import com.handpoint.api.shared.CardEntryType
 import com.handpoint.api.shared.ConnectionStatus
 import com.handpoint.api.shared.FinancialStatus
+import com.handpoint.api.shared.MoToChannel
+import com.handpoint.api.shared.options.MoToOptions
 import com.handpoint.api.shared.SafTransactionStatus
 import com.handpoint.api.shared.StatusInfo
+import com.handpoint.api.shared.TaxInformation
+import com.handpoint.api.shared.options.Options
+import com.handpoint.api.shared.options.RefundOptions
 import com.handpoint.api.shared.options.SaleOptions
 import com.handpoint.api.shared.TransactionResult
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionErrorReason
@@ -19,12 +24,16 @@ import com.handpoint.safclient.domain.model.EntryMode
 import com.handpoint.safclient.domain.model.ForwardingError
 import com.handpoint.safclient.domain.model.ForwardingResult
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.MotoChannel
+import com.handpoint.safclient.domain.model.OperationRequest
 import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.Sale
 import com.handpoint.safclient.domain.model.SaleChannel
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
+import com.handpoint.safclient.domain.model.ResultLine
 import com.handpoint.safclient.domain.model.SaleSurcharge
+import com.handpoint.safclient.domain.model.SaleTax
 import com.handpoint.safclient.domain.model.TerminalConnection
 import java.math.BigInteger
 import java.time.Instant
@@ -58,6 +67,8 @@ internal fun TransactionResult.toOutcome(amount: Money, now: Instant, surcharge:
                 merchantReceipt = merchantReceipt.ifBlank { null },
                 customerReceipt = customerReceipt.ifBlank { null },
                 surcharge = surcharge.withResultOf(this),
+                resultValues = toResultLines(),
+                transactionId = transactionID.ifBlank { null },
             ),
         )
 
@@ -105,6 +116,8 @@ internal fun TransactionResult.toOnlineOutcome(amount: Money, now: Instant, surc
                 customerReceipt = customerReceipt.ifBlank { null },
                 channel = SaleChannel.ONLINE,
                 surcharge = surcharge.withResultOf(this),
+                resultValues = toResultLines(),
+                transactionId = transactionID.ifBlank { null },
             ),
         )
 
@@ -126,6 +139,76 @@ internal fun TransactionResult.toOnlineOutcome(amount: Money, now: Instant, surc
 @OptIn(HapiExperimental::class)
 internal fun SaleOptions.withSurcharge(surcharge: SaleSurcharge?): SaleOptions = apply {
     if (surcharge != null) surchargeAmount = BigInteger.valueOf(surcharge.sent.minorUnits)
+}
+
+/**
+ * Sets the tax fields of a test sale. SDK 7.1014.5 adds the Level II tax to the amount (and the
+ * legacy tax only when there is no Level II tax); the app never adds either itself.
+ */
+@Suppress("DEPRECATION")
+@OptIn(HapiExperimental::class)
+internal fun <T : Options> T.withTax(tax: SaleTax): T = apply {
+    tax.legacyTaxMinor?.let { taxAmount = BigInteger.valueOf(it) }
+    if (tax.hasLevel2) taxInformation = TaxInformation(BigInteger.valueOf(tax.level2TaxMinor ?: 0L), tax.taxExempt)
+    tax.purchaseOrder?.let { purchaseOrderNumber = it }
+}
+
+/**
+ * Sets the surcharge and the tax fields of a test operation, whatever the operation is. A refund
+ * must refuse them in SDK 7.1014.5 (SDKS-467); the app does not filter them out.
+ */
+@OptIn(HapiExperimental::class)
+internal fun <T : Options> T.withExtras(request: OperationRequest): T = apply {
+    request.surchargeMinor?.let { surchargeAmount = BigInteger.valueOf(it) }
+    withTax(request.tax)
+}
+
+/** The MoTo options of [request]: the channel, the AVS fields and the surcharge and tax fields. */
+internal fun OperationRequest.toMoToOptions(): MoToOptions = MoToOptions().apply {
+    channel = when (motoChannel) {
+        MotoChannel.MAIL_ORDER -> MoToChannel.MO
+        MotoChannel.TELEPHONE_ORDER -> MoToChannel.TO
+    }
+    enableAvsFields = avsFields
+}.withExtras(this)
+
+/** The identifiers a linked refund or a reversal of this result needs, as the integrator reads them. */
+internal fun TransactionResult.toIdentifierLines(): List<ResultLine> = listOf(
+    ResultLine("type", type.toString()),
+    ResultLine("transactionID", transactionID.ifBlank { "(blank)" }),
+    ResultLine("eFTTransactionID", eFTTransactionID.ifBlank { "(blank)" }),
+    ResultLine("originalEFTTransactionID", originalEFTTransactionID.ifBlank { "(blank)" }),
+    ResultLine("authorisationCode", authorisationCode.ifBlank { "(blank)" }),
+    ResultLine("currency", currency.toString()),
+)
+
+/**
+ * Every value of the result that the surcharge and tax tickets touch, exactly as the integrator
+ * reads it. `null` is written as `null`: SDKS-470 is about telling it from an empty object.
+ * [Surcharge.amount][com.handpoint.api.shared.Surcharge] and `taxAmount` are major units since 7.1014.5.
+ */
+@Suppress("DEPRECATION")
+internal fun TransactionResult.toResultLines(): List<ResultLine> {
+    fun Any?.show(): String = when (this) {
+        null -> "null"
+        is java.math.BigDecimal -> toPlainString()
+        else -> toString()
+    }
+    val surchargeText = surcharge?.let { "amount=${it.amount.show()}  applied=${it.applied}  reason=\"${it.reason}\"" } ?: "null"
+    return listOf(
+        ResultLine("finStatus", finStatus.show()),
+        ResultLine("requestedAmount", requestedAmount.show()),
+        ResultLine("totalAmount", totalAmount.show()),
+        ResultLine("tipAmount", tipAmount.show()),
+        ResultLine("dueAmount", dueAmount.show()),
+        ResultLine("surcharge", surchargeText),
+        ResultLine("taxAmount", taxAmount.show()),
+        ResultLine("cardEntryType", cardEntryType.show()),
+        ResultLine("paymentScenario", paymentScenario.show()),
+        ResultLine("maskedCardNumber", maskedCardNumber.show()),
+        ResultLine("errorMessage", errorMessage.show()),
+        ResultLine("transactionReference", transactionReference.show()),
+    )
 }
 
 /** The surcharge the app sent, with what the result says about it ("not reported" when it says nothing). */

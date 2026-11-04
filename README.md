@@ -19,6 +19,18 @@ The Store and Forward reference app for PAX, plus the classic surcharge (`SaleOp
 
 ---
 
+> [!NOTE]
+> **Branch `feat/surcharge-test-14.5`: SAF Surcharge 14.5.** The same test app on Handpoint SDK `7.1014.5-RC.4-SNAPSHOT`
+> (the release is not on Nexus yet), to test SDKS-465, 467, 468, 469 and 470. It installs beside the other two apps
+> (`applicationId` `com.handpoint.safclient.surcharge145`). Added here:
+>
+> - **Settings > Test: tax (Level II)**: `taxAmount` (legacy), `taxInformation.taxAmount`, `taxExempt` and `purchaseOrderNumber`, in minor units, sent with every sale on both APIs.
+> - **TransactionResult panel** on the result screen: `requestedAmount`, `totalAmount`, `surcharge` (`null` or `amount/applied/reason`), `taxAmount` and more, as the SDK returns them (SDKS-469 and SDKS-470).
+> - **Sale detail (history)**: a charged sale offers Refund, Reversal and its receipts. Refund opens a screen to choose refund (linked), MOTO refund (linked) or automatic refund, with optional surcharge, tax and taxInformation fields and the transaction ID filled in; then the keypad with the sale amount.
+> - **Home > New operation**: choose sale, refund (not linked), MOTO sale or MOTO refund (not linked), with optional surcharge, tax and taxInformation fields; then the usual keypad, surcharge notice, card (or the SDK MoTo dialog) and result steps. An approved MoTo sale goes to the history.
+>
+> Check the amount the terminal charges on the receipt and in the gateway: the app sends `amount` as the subtotal and never adds surcharge or tax itself.
+
 ## Why Store and Forward
 
 A shop does not stop selling because the Wi-Fi dropped. With Store and Forward, the terminal approves the sale offline and keeps it **encrypted on the device**. Your app sends it to Handpoint when the network is back, and Handpoint processes each sale **once and only once**.
@@ -171,7 +183,7 @@ handpoint.sharedSecret=replace-me
 
 ```bash
 ./gradlew installDebug        # build and install SAF Surcharge (the original app stays installed)
-./gradlew testDebugUnitTest   # run the 355 unit tests; no terminal needed
+./gradlew testDebugUnitTest   # run the 357 unit tests; no terminal needed
 ```
 
 > [!IMPORTANT]
@@ -283,7 +295,7 @@ flowchart TB
 ./gradlew testDebugUnitTest
 ```
 
-There are 355 unit tests. They need no terminal and no network: they use hand-written fakes of both SDK APIs (`testutil/FakeSafApi.kt`, `testutil/FakeHapi.kt`). They cover:
+There are 357 unit tests. They need no terminal and no network: they use hand-written fakes of both SDK APIs (`testutil/FakeSafApi.kt`, `testutil/FakeHapi.kt`). They cover:
 
 - the SDK adapters: events, sale outcomes, declines, timeouts, cancel, forwarding, status and delete;
 - the mode rule: no network, sales waiting, never switching during a sale, the 30 s timeout, retry backoff and the 60 s rule after a network drop;

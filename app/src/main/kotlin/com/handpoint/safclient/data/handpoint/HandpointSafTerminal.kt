@@ -14,6 +14,7 @@ import com.handpoint.safclient.domain.model.ProcessingStatus
 import com.handpoint.safclient.domain.model.SaleOutcome
 import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.SaleSurcharge
+import com.handpoint.safclient.domain.model.SaleTax
 import com.handpoint.safclient.domain.model.StoredSummary
 import com.handpoint.safclient.domain.model.TerminalConnection
 import kotlinx.coroutines.flow.Flow
@@ -95,6 +96,8 @@ import kotlin.time.Duration.Companion.seconds
 class HandpointSafTerminal(
     private val apiFactory: (Events.SmartposRequired) -> StoreAndForwardPaymentsApi,
     private val clock: Clock,
+    /** The tax fields of a test sale, read when each sale starts. */
+    private val saleTax: suspend () -> SaleTax = { SaleTax.NONE },
 ) : StoreAndForwardTerminal {
 
     private val bridge = SdkEventBridge()
@@ -180,12 +183,13 @@ class HandpointSafTerminal(
         return sale(api, amount, surcharge)
     }
 
-    private suspend fun sale(api: StoreAndForwardPaymentsApi, amount: Money, surcharge: SaleSurcharge?): SaleOutcome =
-        listenTo(bridge.transactionResults) { results ->
+    private suspend fun sale(api: StoreAndForwardPaymentsApi, amount: Money, surcharge: SaleSurcharge?): SaleOutcome {
+        val tax = saleTax()
+        return listenTo(bridge.transactionResults) { results ->
             val start = api.sale(
                 BigInteger.valueOf(amount.minorUnits),
                 amount.currency.toSdkCurrency(),
-                SaleOptions(checkDuplicates = false).withSurcharge(surcharge),
+                SaleOptions(checkDuplicates = false).withSurcharge(surcharge).withTax(tax),
             )
             if (start.operationStarted) {
                 awaitSaleEnd(api, start.transactionReference, amount, surcharge, results)
@@ -193,6 +197,7 @@ class HandpointSafTerminal(
                 rejectionOutcome(start, amount, results)
             }
         }
+    }
 
     /**
      * Waits for the end of the started sale [reference].

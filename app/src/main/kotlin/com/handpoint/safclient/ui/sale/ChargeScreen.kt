@@ -64,6 +64,8 @@ fun CardStepContent(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
     surcharge: SaleSurcharge? = null,
+    /** A MoTo operation: the SDK shows its own screen for the card data, so the app does not ask for the card. */
+    moto: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -90,7 +92,7 @@ fun CardStepContent(
             }
             Spacer(Modifier.height(12.dp))
             AnimatedContent(
-                targetState = step.message(),
+                targetState = if (moto && (step == null || step.kind == CardStep.Kind.PRESENT_CARD)) MOTO_MESSAGE else step.message(),
                 transitionSpec = { fadeIn() togetherWith fadeOut() },
                 label = "cardStep",
             ) { message ->
@@ -203,3 +205,5 @@ private fun CardStepContentPreview() = SafPreviewSurface {
         onCancel = {},
     )
 }
+
+private const val MOTO_MESSAGE = "Enter the card data on the MoTo screen"

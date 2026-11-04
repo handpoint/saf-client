@@ -1,6 +1,7 @@
 package com.handpoint.safclient.testutil
 
 import com.handpoint.safclient.domain.AppPreferences
+import com.handpoint.safclient.domain.model.SaleTax
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.math.BigDecimal
 import java.util.Currency
@@ -11,6 +12,12 @@ class FakePreferences(currency: Currency = Currency.getInstance("USD")) : AppPre
     override val safCurrency = MutableStateFlow(currency)
     override val surchargeEnabled = MutableStateFlow(false)
     override val surchargePercent = MutableStateFlow(BigDecimal("3"))
+
+    override val saleTax = MutableStateFlow(SaleTax.NONE)
+
+    override suspend fun setSaleTax(tax: SaleTax) {
+        saleTax.value = tax
+    }
 
     override suspend fun setMerchantName(name: String) {
         merchantName.value = name

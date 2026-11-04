@@ -31,4 +31,10 @@ data class SaleEntity(
     val surchargeApplied: Boolean? = null,
     @ColumnInfo(defaultValue = "NULL")
     val surchargeReason: String? = null,
+    /** The SDK's `transactionID`, for a linked refund. Schema version 4. */
+    @ColumnInfo(defaultValue = "NULL")
+    val transactionId: String? = null,
+    /** A MoTo sale. Schema version 5. */
+    @ColumnInfo(defaultValue = "0")
+    val moto: Boolean = false,
 )

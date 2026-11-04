@@ -6,6 +6,7 @@ import com.handpoint.api.shared.FinancialStatus
 import com.handpoint.api.shared.PaymentScenario
 import com.handpoint.api.shared.SafTransactionStatus
 import com.handpoint.api.shared.StatusInfo
+import com.handpoint.api.shared.Surcharge
 import com.handpoint.api.shared.TransactionResult
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionErrorReason
 import com.handpoint.api.shared.storeandforward.ForwardingTransactionStatus
@@ -23,11 +24,18 @@ import com.handpoint.safclient.domain.model.SaleReference
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.testutil.FakeSafApi.Companion.SALE_REFERENCE
 import java.time.Instant
+import com.handpoint.api.shared.MoToChannel
+import com.handpoint.api.shared.options.RefundOptions
+import com.handpoint.safclient.domain.model.MotoChannel
+import com.handpoint.safclient.domain.model.OperationKind
+import com.handpoint.safclient.domain.model.OperationRequest
+import com.handpoint.safclient.domain.model.SaleTax
 import java.util.Currency
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.math.BigDecimal
 
 class SdkMappersTest {
 
@@ -56,6 +64,27 @@ class SdkMappersTest {
     }
 
     @Test
+    fun `the result values show a missing surcharge and tax as null`() {
+        val lines = transactionResult(FinancialStatus.AUTHORISED).toResultLines().associate { it.label to it.value }
+
+        assertEquals("null", lines["surcharge"])
+        assertEquals("null", lines["taxAmount"])
+    }
+
+    @Test
+    fun `the result values show the surcharge and tax amounts as the SDK returns them`() {
+        val result = transactionResult(FinancialStatus.AUTHORISED).apply {
+            surcharge = Surcharge(BigDecimal("3.54"), false, "Debit card")
+            taxAmount = BigDecimal("8.00")
+        }
+
+        val lines = result.toResultLines().associate { it.label to it.value }
+
+        assertEquals("amount=3.54  applied=false  reason=\"Debit card\"", lines["surcharge"])
+        assertEquals("8.00", lines["taxAmount"])
+    }
+
+    @Test
     fun `deferred authorisation is an offline approval stored on the terminal`() {
         val result = transactionResult(FinancialStatus.AUTHORISED_DEFERRED).apply {
             maskedCardNumber = "************4242"
@@ -78,6 +107,7 @@ class SdkMappersTest {
                     sentAt = null,
                     status = ProcessingStatus.STORED,
                     statusCheckedAt = null,
+                    resultValues = result.toResultLines(),
                     merchantReceipt = "merchant copy",
                     customerReceipt = "customer copy",
                 ),
@@ -256,5 +286,43 @@ class SdkMappersTest {
             }
             assertEquals(code, SaleOutcome.Declined(reason, "Readable message for $code"), result.toOutcome(amount, now))
         }
+    }
+
+    @Test
+    fun `a MoTo request sets the channel, the AVS fields, the surcharge and the tax`() {
+        val request = OperationRequest(
+            kind = OperationKind.MOTO_REFUND,
+            amount = Money(1000, Currency.getInstance("USD")),
+            surchargeMinor = 30,
+            tax = SaleTax(level2TaxMinor = 80, purchaseOrder = "PO-1"),
+            motoChannel = MotoChannel.MAIL_ORDER,
+            avsFields = true,
+        )
+
+        val options = request.toMoToOptions()
+
+        assertEquals(MoToChannel.MO, options.channel)
+        assertTrue(options.enableAvsFields)
+        assertEquals(java.math.BigInteger.valueOf(30), options.surchargeAmount)
+        assertEquals(java.math.BigInteger.valueOf(80), options.taxInformation?.taxAmount)
+        assertEquals("PO-1", options.purchaseOrderNumber)
+    }
+
+    @Test
+    fun `a request with no surcharge or tax sends none`() {
+        val request = OperationRequest(OperationKind.REFUND, Money(500, Currency.getInstance("USD")))
+
+        val options = RefundOptions().withExtras(request)
+
+        assertNull(options.surchargeAmount)
+        assertNull(options.taxInformation)
+    }
+
+    @Test
+    fun `the identifier lines show the transaction IDs a linked refund needs`() {
+        val lines = TransactionResult().apply { transactionID = "tx-1" }.toIdentifierLines().associate { it.label to it.value }
+
+        assertEquals("tx-1", lines["transactionID"])
+        assertEquals("(blank)", lines["eFTTransactionID"])
     }
 }

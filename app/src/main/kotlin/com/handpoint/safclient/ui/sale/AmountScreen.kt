@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.handpoint.safclient.R
 import com.handpoint.safclient.domain.model.ModeState
 import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.OperationKind
 import com.handpoint.safclient.domain.model.NetworkStatus
 import com.handpoint.safclient.domain.model.PaymentMode
 import com.handpoint.safclient.domain.model.TerminalConnection
@@ -66,10 +67,11 @@ fun AmountContent(
     onCharge: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    operation: OperationKind = OperationKind.SALE,
 ) {
     Column(modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("New sale") },
+            title = { Text(if (operation == OperationKind.SALE) "New sale" else operation.label) },
             navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "Back")
@@ -100,9 +102,9 @@ fun AmountContent(
             Keypad(onDigit = onDigit, onDoubleZero = onDoubleZero, onBackspace = onBackspace)
             Spacer(Modifier.height(16.dp))
             PrimaryButton(
-                text = chargeLabel(amount, mode.mode),
+                text = if (operation == OperationKind.SALE) chargeLabel(amount, mode.mode) else "Run ${amount.format()}",
                 onClick = onCharge,
-                enabled = amount.minorUnits > 0 && !mode.isSwitching,
+                enabled = (amount.minorUnits > 0 || !operation.needsAmount) && !mode.isSwitching,
                 emphasis = ButtonEmphasis.Accent,
             )
         }

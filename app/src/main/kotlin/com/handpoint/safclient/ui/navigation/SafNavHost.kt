@@ -10,8 +10,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.handpoint.safclient.domain.model.total
 import com.handpoint.safclient.ui.detail.SaleDetailRoute
 import com.handpoint.safclient.ui.home.HomeRoute
+import com.handpoint.safclient.ui.operations.OperationsRoute
 import com.handpoint.safclient.ui.sale.SaleRoute
 import com.handpoint.safclient.ui.sending.SendingRoute
 import com.handpoint.safclient.ui.settings.SettingsRoute
@@ -33,18 +35,45 @@ fun SafNavHost(
         composable(Routes.HOME) {
             HomeRoute(
                 viewModel = hiltViewModel(),
-                onNewSale = { open(Routes.AMOUNT) },
+                onNewSale = { open(Routes.operations()) },
                 onSendNow = { open(Routes.SENDING) },
                 onOpenSale = { open(Routes.sale(it)) },
                 onOpenSettings = { open(Routes.SETTINGS) },
             )
         }
-        composable(Routes.AMOUNT) { SaleRoute(viewModel = hiltViewModel(), onDone = back()) }
+        composable(
+            route = Routes.AMOUNT,
+            arguments = listOf(
+                navArgument(Routes.AMOUNT_VALUE) { type = NavType.StringType; nullable = true; defaultValue = null },
+            ),
+        ) { SaleRoute(viewModel = hiltViewModel(), onDone = back()) }
         composable(Routes.SENDING) { SendingRoute(viewModel = hiltViewModel(), onDone = back()) }
         composable(
             route = Routes.SALE,
             arguments = listOf(navArgument(Routes.SALE_REFERENCE) { type = NavType.StringType }),
-        ) { SaleDetailRoute(viewModel = hiltViewModel(), onBack = back()) }
+        ) {
+            SaleDetailRoute(
+                viewModel = hiltViewModel(),
+                onBack = back(),
+                onRefund = { sale ->
+                    open(Routes.refundSetup(sale.transactionId ?: sale.reference.value, sale.total.minorUnits, sale.isMoto))
+                },
+            )
+        }
         composable(Routes.SETTINGS) { SettingsRoute(viewModel = hiltViewModel(), onBack = back()) }
+        composable(
+            route = Routes.OPERATIONS,
+            arguments = listOf(
+                navArgument(Routes.OPERATIONS_TXN) { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument(Routes.OPERATIONS_AMOUNT) { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument(Routes.OPERATIONS_MOTO) { type = NavType.StringType; nullable = true; defaultValue = null },
+            ),
+        ) {
+            OperationsRoute(
+                viewModel = hiltViewModel(),
+                onContinue = { prefill -> open(Routes.amount(prefill)) },
+                onBack = back(),
+            )
+        }
     }
 }

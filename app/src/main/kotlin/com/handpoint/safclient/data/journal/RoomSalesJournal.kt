@@ -60,6 +60,8 @@ private fun SaleEntity.toDomain() = Sale(
     customerReceipt = customerReceipt,
     channel = SaleChannel.valueOf(channel),
     surcharge = toSurcharge(Currency.getInstance(currencyCode)),
+    transactionId = transactionId,
+    isMoto = moto,
 )
 
 private fun SaleEntity.toSurcharge(currency: Currency): SaleSurcharge? {
@@ -85,4 +87,6 @@ private fun Sale.toEntity() = SaleEntity(
     surchargeSentMinor = surcharge?.sent?.minorUnits,
     surchargeApplied = surcharge?.applied,
     surchargeReason = surcharge?.reason,
+    transactionId = transactionId,
+    moto = isMoto,
 )

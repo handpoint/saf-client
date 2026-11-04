@@ -21,13 +21,14 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.handpoint.safclient.surcharge"
+        applicationId = "com.handpoint.safclient.surcharge145"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0-surcharge"
+        versionName = "1.0"
 
         buildConfigField("String", "SHARED_SECRET", buildConfigString(localProps.getProperty("handpoint.sharedSecret", "")))
+        buildConfigField("String", "CLOUD_API_KEY", buildConfigString(localProps.getProperty("handpoint.cloudApiKey", "")))
         buildConfigField("String", "SAF_CURRENCY", buildConfigString(localProps.getProperty("handpoint.safCurrency", "USD")))
         buildConfigField("String", "SDK_VERSION", buildConfigString(libs.versions.handpointSdk.get()))
 

@@ -1,6 +1,9 @@
 package com.handpoint.safclient.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalContext
+import android.app.Activity
 import com.handpoint.safclient.ui.theme.PillShape
 import com.handpoint.safclient.ui.components.ButtonEmphasis
 import androidx.compose.ui.semantics.Role
@@ -142,6 +145,8 @@ fun HomeScreen(
                         Text(state.merchantName, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     },
                     actions = {
+                        val activity = LocalContext.current as? Activity
+                        TextButton(onClick = { activity?.finishAffinity() }) { Text("Exit") }
                         ConnectionStatus(state.connection, onRetryConnection)
                         IconButton(onClick = onOpenSettings) {
                             Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
@@ -347,7 +352,7 @@ private fun CardButton(
 @Composable
 private fun NewSale(enabled: Boolean, hint: String, onNewSale: () -> Unit) {
     Column(Modifier.padding(top = 12.dp)) {
-        PrimaryButton(text = "New sale", onClick = onNewSale, enabled = enabled, emphasis = ButtonEmphasis.Accent)
+        PrimaryButton(text = "New operation", onClick = onNewSale, enabled = enabled, emphasis = ButtonEmphasis.Accent)
         if (!enabled) {
             Text(
                 text = hint,

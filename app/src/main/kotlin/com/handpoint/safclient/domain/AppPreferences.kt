@@ -1,5 +1,6 @@
 package com.handpoint.safclient.domain
 
+import com.handpoint.safclient.domain.model.SaleTax
 import kotlinx.coroutines.flow.Flow
 import java.math.BigDecimal
 import java.util.Currency
@@ -14,6 +15,11 @@ interface AppPreferences {
 
     /** The surcharge, as a percent of the sale amount (3 means 3%). */
     val surchargePercent: Flow<BigDecimal>
+
+    /** The tax fields every test sale sends (Level II and legacy). */
+    val saleTax: Flow<SaleTax>
+
+    suspend fun setSaleTax(tax: SaleTax)
 
     suspend fun setMerchantName(name: String)
 

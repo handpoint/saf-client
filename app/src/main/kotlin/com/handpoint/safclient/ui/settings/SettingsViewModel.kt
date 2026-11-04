@@ -6,6 +6,8 @@ import com.handpoint.safclient.di.IoDispatcher
 import com.handpoint.safclient.domain.AppPreferences
 import com.handpoint.safclient.domain.ErrorReporter
 import com.handpoint.safclient.domain.PaymentModeCoordinator
+import com.handpoint.safclient.domain.model.Money
+import com.handpoint.safclient.domain.model.SaleTax
 import com.handpoint.safclient.domain.model.TerminalConnection
 import com.handpoint.safclient.domain.reportingErrors
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -45,16 +48,17 @@ class SettingsViewModel @Inject constructor(
 
     private val connecting = MutableStateFlow(false)
 
-    private val surcharge = combine(preferences.surchargeEnabled, preferences.surchargePercent, ::Pair)
-
     val uiState: StateFlow<SettingsUiState> = combine(
         preferences.merchantName,
         preferences.safCurrency,
         payments.connection,
         connecting,
-        surcharge,
+        combine(preferences.surchargeEnabled, preferences.surchargePercent) { enabled, percent -> enabled to percent },
     ) { name, currency, connection, connecting, (surchargeEnabled, surchargePercent) ->
-        SettingsUiState(name, currency, connection, connecting, surchargeEnabled, surchargePercent)
+        SettingsUiState(
+            name, currency, connection, connecting,
+            surchargeEnabled, surchargePercent,
+        )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),

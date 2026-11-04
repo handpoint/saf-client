@@ -39,6 +39,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import java.time.Clock
 import javax.inject.Singleton
 
@@ -53,7 +54,7 @@ object AppModule {
      */
     @Provides
     @Singleton
-    fun provideTerminal(clock: Clock): StoreAndForwardTerminal = HandpointSafTerminal(
+    fun provideTerminal(clock: Clock, preferences: AppPreferences): StoreAndForwardTerminal = HandpointSafTerminal(
         apiFactory = { delegate ->
             HapiFactory.getStoreAndForwardPaymentsApi(
                 delegate,
@@ -62,6 +63,7 @@ object AppModule {
             )
         },
         clock = clock,
+        saleTax = { preferences.saleTax.first() },
     )
 
     /**
@@ -70,15 +72,17 @@ object AppModule {
      */
     @Provides
     @Singleton
-    fun provideOnlineTerminal(clock: Clock): OnlineTerminal = HandpointOnlineTerminal(
+    fun provideOnlineTerminal(clock: Clock, preferences: AppPreferences): OnlineTerminal = HandpointOnlineTerminal(
         apiFactory = { delegate ->
             HapiFactory.getAsyncInterface(
                 delegate,
-                credentials = HandpointCredentials(BuildConfig.SHARED_SECRET),
+                credentials = HandpointCredentials(BuildConfig.SHARED_SECRET, BuildConfig.CLOUD_API_KEY.ifBlank { null }),
                 settings = Settings(),
             )
         },
         clock = clock,
+        saleTax = { preferences.saleTax.first() },
+        motoAvailable = BuildConfig.CLOUD_API_KEY.isNotBlank(),
     )
 
     /** Chooses online or Store and Forward and switches between them (see its KDoc). */
@@ -109,7 +113,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SafDatabase =
         Room.databaseBuilder(context, SafDatabase::class.java, "saf-client.db")
-            .addMigrations(SafDatabase.MIGRATION_1_2, SafDatabase.MIGRATION_2_3)
+            .addMigrations(SafDatabase.MIGRATION_1_2, SafDatabase.MIGRATION_2_3, SafDatabase.MIGRATION_3_4, SafDatabase.MIGRATION_4_5)
             .build()
 
     @Provides

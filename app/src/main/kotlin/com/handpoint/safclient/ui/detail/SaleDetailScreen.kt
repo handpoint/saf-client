@@ -1,5 +1,7 @@
 package com.handpoint.safclient.ui.detail
 
+import com.handpoint.safclient.ui.components.PrimaryButton
+import com.handpoint.safclient.ui.components.ButtonEmphasis
 import com.handpoint.safclient.ui.components.TransactionResultDialog
 import android.content.ClipData
 import androidx.compose.foundation.background
@@ -166,18 +168,18 @@ fun SaleDetailScreen(
                         .navigationBarsPadding()
                         .fillMaxWidth()
                         .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (sale.hasResult()) {
-                        SecondaryButton(text = "View transaction result", onClick = { viewingResult = true })
+                        PrimaryButton(text = "View transaction result", onClick = { viewingResult = true }, emphasis = ButtonEmphasis.Accent)
                     }
                     if (state.canRefund) {
-                        SecondaryButton(text = "Refund", onClick = onRefund, enabled = !state.operationRunning, tone = ButtonTone.Warning)
-                        SecondaryButton(
+                        PrimaryButton(text = "Refund", onClick = onRefund, enabled = !state.operationRunning, emphasis = ButtonEmphasis.Warning)
+                        PrimaryButton(
                             text = "Reversal",
                             onClick = { confirmingReverse = true },
                             loading = state.operationRunning,
-                            tone = ButtonTone.Negative,
+                            emphasis = ButtonEmphasis.Negative,
                         )
                     }
                     if (state.canRefresh) {

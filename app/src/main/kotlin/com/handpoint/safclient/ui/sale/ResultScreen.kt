@@ -125,9 +125,9 @@ fun ResultContent(
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when {
                 copy.canPrint -> {
-                    if (sale != null) SecondaryButton(text = "View receipts", onClick = { viewingReceipts = true })
+                    if (sale != null) PrimaryButton(text = "View receipts", onClick = { viewingReceipts = true }, emphasis = ButtonEmphasis.Accent)
                     if (sale != null && (sale.resultValues.isNotEmpty() || sale.resultJson != null)) {
-                        SecondaryButton(text = "View transaction result", onClick = { viewingResult = true })
+                        PrimaryButton(text = "View transaction result", onClick = { viewingResult = true }, emphasis = ButtonEmphasis.Accent)
                     }
                     SecondaryButton(
                         text = if (printing) "Printing…" else "Print receipt",

@@ -218,7 +218,7 @@ private fun ExtrasSection(form: OperationForm, showSurcharge: Boolean, onEdit: (
                     Text("Add surcharge or tax fields", style = MaterialTheme.typography.titleSmall)
                     Text(
                         if (form.kind == OperationKind.SALE) {
-                            "Optional. Minor units, sent as typed (a 0 too), with no notice for the customer."
+                            "Optional. Minor units, sent as typed (a 0 too). The customer still sees the surcharge notice."
                         } else {
                             "Optional. Amounts in minor units, sent as typed."
                         },
@@ -240,6 +240,14 @@ private fun ExtrasSection(form: OperationForm, showSurcharge: Boolean, onEdit: (
                     NumberField(form.legacyTax, "taxAmount (legacy)") { text -> onEdit { it.copy(legacyTax = text) } }
                     NumberField(form.level2Tax, "taxInformation.taxAmount") { text -> onEdit { it.copy(level2Tax = text) } }
                     CheckRow("taxInformation.taxExempt", form.taxExempt) { onEdit { it.copy(taxExempt = !it.taxExempt) } }
+                    OutlinedTextField(
+                        value = form.purchaseOrder,
+                        onValueChange = { text -> onEdit { it.copy(purchaseOrder = text) } },
+                        label = { Text("purchaseOrderNumber") },
+                        supportingText = { Text("SDK 7.1015: required with taxInformation. Letters and digits, up to 25.") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }

@@ -18,6 +18,7 @@ data class OperationForm(
     val legacyTax: String = "",
     val level2Tax: String = "",
     val taxExempt: Boolean = false,
+    val purchaseOrder: String = "",
     val motoChannel: MotoChannel = MotoChannel.TELEPHONE_ORDER,
     val avsFields: Boolean = false,
     /** Add the surcharge of Settings to a sale, when Settings has it on. */
@@ -41,7 +42,13 @@ fun OperationForm.toExtras(): OperationExtras? {
     val level2 = parseMinor(level2Tax) ?: return null
     return OperationExtras(
         surchargeMinor = surchargeMinor.value,
-        tax = SaleTax(legacyTaxMinor = legacy.value, level2TaxMinor = level2.value, taxExempt = taxExempt),
+        tax = SaleTax(
+            legacyTaxMinor = legacy.value,
+            level2TaxMinor = level2.value,
+            taxExempt = taxExempt,
+            // As typed: the SDK checks it (required with taxInformation, letters and digits, up to 25).
+            purchaseOrder = purchaseOrder.trim().ifEmpty { null },
+        ),
     )
 }
 

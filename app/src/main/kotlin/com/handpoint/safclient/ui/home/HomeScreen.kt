@@ -146,7 +146,10 @@ fun HomeScreen(
                     },
                     actions = {
                         val activity = LocalContext.current as? Activity
-                        TextButton(onClick = { activity?.finishAffinity() }) { Text("Exit") }
+                        TextButton(
+                            onClick = { activity?.finishAffinity() },
+                            colors = ButtonDefaults.textButtonColors(contentColor = SafTheme.colors.negativeAction.container),
+                        ) { Text("Exit") }
                         ConnectionStatus(state.connection, onRetryConnection)
                         IconButton(onClick = onOpenSettings) {
                             Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
@@ -352,7 +355,7 @@ private fun CardButton(
 @Composable
 private fun NewSale(enabled: Boolean, hint: String, onNewSale: () -> Unit) {
     Column(Modifier.padding(top = 12.dp)) {
-        PrimaryButton(text = "New operation", onClick = onNewSale, enabled = enabled, emphasis = ButtonEmphasis.Accent)
+        PrimaryButton(text = "New operation", onClick = onNewSale, enabled = enabled, emphasis = ButtonEmphasis.Positive)
         if (!enabled) {
             Text(
                 text = hint,

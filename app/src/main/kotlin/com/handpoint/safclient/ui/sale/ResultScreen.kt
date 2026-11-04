@@ -133,7 +133,7 @@ fun ResultContent(
                         onClick = onPrint,
                         enabled = !printing,
                     )
-                    PrimaryButton(text = "Done", onClick = onDone, emphasis = ButtonEmphasis.Accent)
+                    PrimaryButton(text = "Done", onClick = onDone, emphasis = ButtonEmphasis.Positive)
                 }
                 copy.canChangeAmount -> {
                     PrimaryButton(text = "Change amount", onClick = onChangeAmount, emphasis = ButtonEmphasis.Accent)

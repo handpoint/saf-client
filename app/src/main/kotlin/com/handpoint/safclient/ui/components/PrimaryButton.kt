@@ -33,8 +33,11 @@ import com.handpoint.safclient.ui.theme.SafTheme
 /** Minimum height of a primary action; comfortably above the 56 dp touch target. */
 private val PrimaryButtonHeight = 60.dp
 
-/** Colour of a [PrimaryButton]: [Ink] by default, [Accent] for the screen's lead action next to dark content. */
-enum class ButtonEmphasis { Ink, Accent }
+/**
+ * Colour of a [PrimaryButton]: [Ink] by default, [Accent] for the screen's lead action next to dark content,
+ * [Positive] (green) for an action that goes forward or confirms, [Negative] (red) for one that stops or undoes.
+ */
+enum class ButtonEmphasis { Ink, Accent, Positive, Negative }
 
 /**
  * The single main action of a screen (Charge, Send now). Full width, 60 dp tall.
@@ -61,6 +64,8 @@ fun PrimaryButton(
     val (container, content) = when (emphasis) {
         ButtonEmphasis.Ink -> colors.primary to colors.onPrimary
         ButtonEmphasis.Accent -> SafTheme.colors.accentAction.let { it.container to it.content }
+        ButtonEmphasis.Positive -> SafTheme.colors.positiveAction.let { it.container to it.content }
+        ButtonEmphasis.Negative -> SafTheme.colors.negativeAction.let { it.container to it.content }
     }
     // While loading the button is not clickable, but it keeps its active colours.
     val buttonColors = if (loading) {

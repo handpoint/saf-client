@@ -105,7 +105,7 @@ fun AmountContent(
                 text = if (operation == OperationKind.SALE) chargeLabel(amount, mode.mode) else "Run ${amount.format()}",
                 onClick = onCharge,
                 enabled = (amount.minorUnits > 0 || !operation.needsAmount) && !mode.isSwitching,
-                emphasis = ButtonEmphasis.Accent,
+                emphasis = ButtonEmphasis.Positive,
             )
         }
     }

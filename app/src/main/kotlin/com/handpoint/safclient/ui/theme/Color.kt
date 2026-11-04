@@ -45,6 +45,10 @@ data class SafColors(
     val accent: Color,
     /** Filled accent action (New sale): label on accent, WCAG AA in both themes. */
     val accentAction: Tone,
+    /** Filled action that goes forward or confirms (Charge, Run, Continue): label on green, WCAG AA. */
+    val positiveAction: Tone,
+    /** Filled action that stops or undoes (Cancel, Reversal, Delete): label on red, WCAG AA. */
+    val negativeAction: Tone,
 )
 
 internal val LightSafColors = SafColors(
@@ -58,6 +62,8 @@ internal val LightSafColors = SafColors(
     keySurface = CardWhite,
     accent = Accent,
     accentAction = Tone(content = Color.White, container = Accent),
+    positiveAction = Tone(content = Color.White, container = Color(0xFF13683F)),
+    negativeAction = Tone(content = Color.White, container = ErrorLight),
 )
 
 internal val DarkSafColors = SafColors(
@@ -71,4 +77,6 @@ internal val DarkSafColors = SafColors(
     keySurface = CardDark,
     accent = AccentDark,
     accentAction = Tone(content = CanvasDark, container = AccentDark),
+    positiveAction = Tone(content = CanvasDark, container = Color(0xFF5CD394)),
+    negativeAction = Tone(content = CanvasDark, container = ErrorDark),
 )
